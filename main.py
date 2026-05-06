@@ -1,4 +1,5 @@
-"""FastAPI orchestrator: financial report -> analysis PDF + debug report + trace.json."""
+"""FastAPI orchestrator: SME Valuation Report — 7 agents."""
+import asyncio
 import json
 import logging
 import os
@@ -11,11 +12,16 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 
 from agents.analyzer import analyze
+from agents.business_profile import analyze_business
 from agents.extractor import extract
-from agents.renderer import render_analysis, render_report
+from agents.industry import analyze_industry
+from agents.projector import project
+from agents.renderer import render_report, render_valuation_report
+from agents.thesis_writer import write as write_thesis
+from agents.valuator import value as compute_valuation
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-log = logging.getLogger("financial-analyzer")
+log = logging.getLogger("sme-valuation")
 
 BASE_DIR = Path(__file__).parent
 UPLOAD_DIR = BASE_DIR / "uploads"
@@ -24,9 +30,9 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 ALLOWED_SUFFIXES = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif"}
-MAX_BYTES = 20 * 1024 * 1024
+MAX_BYTES = 25 * 1024 * 1024
 
-app = FastAPI(title="Financial Report Analyzer — 3 Agents (Opus 4.7)")
+app = FastAPI(title="SME Valuation Report — 7 Agents (Opus 4.7)")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -52,8 +58,8 @@ async def process(file: UploadFile = File(...)) -> dict:
 
     job_id = uuid.uuid4().hex[:12]
     upload_path = UPLOAD_DIR / f"{job_id}{suffix}"
-    analysis_path = OUTPUT_DIR / f"{job_id}_analysis.pdf"
-    report_path = OUTPUT_DIR / f"{job_id}_report.pdf"
+    valuation_pdf_path = OUTPUT_DIR / f"{job_id}_valuation.pdf"
+    debug_pdf_path = OUTPUT_DIR / f"{job_id}_debug.pdf"
     trace_path = OUTPUT_DIR / f"{job_id}_trace.json"
     upload_path.write_bytes(contents)
 
@@ -64,22 +70,75 @@ async def process(file: UploadFile = File(...)) -> dict:
     }
 
     try:
-        log.info("[%s] agent1: extract financials", job_id)
-        a1 = extract(str(upload_path))
-        trace["agent1"] = a1
+        # ---- Agent 1: extract financials (sequential, blocks all downstream)
+        log.info("[%s] agent1: extracting financials", job_id)
+        a1 = await asyncio.to_thread(extract, str(upload_path))
+        trace["agent1_extract"] = a1
         log.info("[%s] agent1 done in %.2fs", job_id, a1["elapsed_sec"])
-        if not a1.get("financials"):
-            raise HTTPException(422, "Không trích xuất được dữ liệu tài chính từ file. Hãy thử file rõ hơn.")
+        financials = a1.get("financials") or {}
+        if not financials:
+            raise HTTPException(422, "Không trích xuất được dữ liệu tài chính.")
 
-        log.info("[%s] agent2: compute ratios + analyze", job_id)
-        a2 = analyze(a1)
-        trace["agent2"] = a2
-        log.info("[%s] agent2 done in %.2fs", job_id, a2["elapsed_sec"])
+        # ---- Agents 2 + 4 in parallel (industry analysis + ratio compute, no deps)
+        log.info("[%s] agents 2+4 in parallel: industry, ratios", job_id)
+        a2_industry, a4_ratios = await asyncio.gather(
+            asyncio.to_thread(analyze_industry, financials),
+            asyncio.to_thread(analyze, financials),
+        )
+        trace["agent2_industry"] = a2_industry
+        trace["agent4_ratios"] = a4_ratios
 
-        log.info("[%s] agent3: render analysis PDF", job_id)
-        a3 = render_analysis(a1, a2, str(analysis_path))
-        trace["agent3"] = a3
-        log.info("[%s] agent3 done: %d pages in %.2fs", job_id, a3["pages"], a3["elapsed_sec"])
+        # ---- Agent 3: business_profile (needs industry)
+        log.info("[%s] agent3: business profile", job_id)
+        a3_business = await asyncio.to_thread(
+            analyze_business, financials, a2_industry.get("industry") or {}
+        )
+        trace["agent3_business"] = a3_business
+
+        # ---- Agent 5: projector (needs financials + ratios + industry)
+        log.info("[%s] agent5: projecting 5y", job_id)
+        a5_projection = await asyncio.to_thread(
+            project, financials, a4_ratios, a2_industry.get("industry") or {}
+        )
+        trace["agent5_projector"] = a5_projection
+
+        # ---- Agent 6: valuator (needs projection)
+        log.info("[%s] agent6: valuation", job_id)
+        a6_valuation = await asyncio.to_thread(
+            compute_valuation, financials, a4_ratios,
+            a2_industry.get("industry") or {}, a5_projection,
+        )
+        trace["agent6_valuator"] = a6_valuation
+
+        # ---- Agent 7: thesis writer (needs everything)
+        log.info("[%s] agent7: thesis", job_id)
+        a7_thesis = await asyncio.to_thread(
+            write_thesis,
+            financials, a4_ratios,
+            a2_industry.get("industry") or {},
+            a3_business.get("business") or {},
+            a5_projection,
+            a6_valuation,
+        )
+        trace["agent7_thesis"] = a7_thesis
+
+        # ---- Agent 8: render PDF
+        log.info("[%s] agent8: rendering valuation report PDF", job_id)
+        payload = {
+            "extracted": a1,
+            "industry": a2_industry,
+            "business": a3_business,
+            "ratios": a4_ratios,
+            "projection": a5_projection,
+            "valuation": a6_valuation,
+            "thesis": a7_thesis,
+        }
+        a8_render = await asyncio.to_thread(
+            render_valuation_report, payload, str(valuation_pdf_path)
+        )
+        trace["agent8_renderer"] = a8_render
+        log.info("[%s] agent8 done: %d pages", job_id, a8_render["pages"])
+
     except HTTPException:
         upload_path.unlink(missing_ok=True)
         raise
@@ -91,66 +150,65 @@ async def process(file: UploadFile = File(...)) -> dict:
     trace["total_elapsed_sec"] = round(time.time() - pipeline_start, 2)
 
     try:
-        trace_path.write_text(json.dumps(trace, ensure_ascii=False, indent=2), encoding="utf-8")
+        trace_path.write_text(json.dumps(trace, ensure_ascii=False, indent=2),
+                              encoding="utf-8")
     except Exception:
         log.exception("[%s] failed to write trace.json", job_id)
 
     try:
-        report_meta = render_report(trace, str(report_path))
-        log.info("[%s] report rendered: %d pages", job_id, report_meta["pages"])
+        debug_meta = render_report(trace, str(debug_pdf_path))
+        log.info("[%s] debug report rendered: %d pages", job_id, debug_meta["pages"])
     except Exception:
-        log.exception("[%s] failed to render report", job_id)
+        log.exception("[%s] failed to render debug report", job_id)
 
     upload_path.unlink(missing_ok=True)
 
-    financials = a1.get("financials") or {}
-    insights = a2.get("insights") or {}
+    industry_data = (a2_industry or {}).get("industry") or {}
+    business_data = (a3_business or {}).get("business") or {}
+    valuation_summary = (a6_valuation or {}).get("summary") or {}
+    thesis_data = (a7_thesis or {}).get("thesis") or {}
 
     return {
         "job_id": job_id,
         "company": financials.get("company") or {},
         "period": financials.get("period") or {},
-        "currency": financials.get("currency"),
         "unit": financials.get("unit"),
-        "health_score": insights.get("health_score"),
-        "health_grade": insights.get("health_grade"),
-        "executive_summary": insights.get("executive_summary"),
-        "key_insights": insights.get("key_insights") or [],
-        "strengths": insights.get("strengths") or [],
-        "weaknesses": insights.get("weaknesses") or [],
-        "red_flags": insights.get("red_flags") or [],
-        "trends": insights.get("trends") or [],
-        "recommendations": insights.get("recommendations") or [],
-        "ratios": a2.get("ratios") or {},
-        "raw_transcription": (financials.get("raw_transcription") or "")[:8000],
-        "thinking": {
-            "agent1": a1.get("thinking", ""),
-            "agent2": a2.get("thinking", ""),
-        },
-        "raw_response": {
-            "agent1": a1.get("raw_response", ""),
-            "agent2": a2.get("raw_response", ""),
-        },
+        "industry_name": industry_data.get("industry_name"),
+        "growth_stage": business_data.get("growth_stage"),
+        "competitive_position": business_data.get("competitive_position"),
+        "executive_summary": thesis_data.get("executive_summary"),
+        "valuation_summary": valuation_summary,
+        "ratios": (a4_ratios or {}).get("ratios"),
+        "growth": (a4_ratios or {}).get("growth"),
+        "investment_thesis": thesis_data.get("investment_thesis"),
+        "deal_recommendation": thesis_data.get("deal_recommendation"),
         "meta": {
-            "agent1": {
-                "model": a1.get("model"),
-                "elapsed_sec": a1.get("elapsed_sec"),
-                "usage": a1.get("usage"),
-            },
-            "agent2": {
-                "model": a2.get("model"),
-                "elapsed_sec": a2.get("elapsed_sec"),
-                "usage": a2.get("usage"),
-            },
-            "agent3": {
-                "elapsed_sec": a3.get("elapsed_sec"),
-                "pages": a3.get("pages"),
+            "agent1_extract": _meta(a1),
+            "agent2_industry": _meta(a2_industry),
+            "agent3_business": _meta(a3_business),
+            "agent4_ratios": _meta(a4_ratios),
+            "agent5_projector": _meta(a5_projection),
+            "agent6_valuator": _meta(a6_valuation),
+            "agent7_thesis": _meta(a7_thesis),
+            "agent8_renderer": {
+                "elapsed_sec": a8_render.get("elapsed_sec"),
+                "pages": a8_render.get("pages"),
             },
             "total_elapsed_sec": trace["total_elapsed_sec"],
         },
-        "analysis_url": f"/api/download/{job_id}/analysis",
-        "report_url": f"/api/download/{job_id}/report",
+        "valuation_url": f"/api/download/{job_id}/valuation",
+        "debug_url": f"/api/download/{job_id}/debug",
         "trace_url": f"/api/download/{job_id}/trace",
+    }
+
+
+def _meta(payload):
+    if not isinstance(payload, dict):
+        return {}
+    return {
+        "model": payload.get("model"),
+        "elapsed_sec": payload.get("elapsed_sec"),
+        "usage": payload.get("usage"),
     }
 
 
@@ -158,15 +216,16 @@ async def process(file: UploadFile = File(...)) -> dict:
 def download(job_id: str, kind: str) -> FileResponse:
     if not _safe_job_id(job_id):
         raise HTTPException(400, "Invalid job_id")
-
     mapping = {
-        "analysis": (f"{job_id}_analysis.pdf", "application/pdf", f"phan_tich_BCTC_{job_id}.pdf"),
-        "report": (f"{job_id}_report.pdf", "application/pdf", f"bao_cao_debug_{job_id}.pdf"),
-        "trace": (f"{job_id}_trace.json", "application/json", f"trace_{job_id}.json"),
+        "valuation": (f"{job_id}_valuation.pdf", "application/pdf",
+                      f"dinh_gia_DN_{job_id}.pdf"),
+        "debug": (f"{job_id}_debug.pdf", "application/pdf",
+                  f"debug_{job_id}.pdf"),
+        "trace": (f"{job_id}_trace.json", "application/json",
+                  f"trace_{job_id}.json"),
     }
     if kind not in mapping:
-        raise HTTPException(400, "Invalid kind. Use: analysis | report | trace")
-
+        raise HTTPException(400, "Invalid kind. Use: valuation | debug | trace")
     fname, mime, dl_name = mapping[kind]
     fpath = OUTPUT_DIR / fname
     if not fpath.exists():
