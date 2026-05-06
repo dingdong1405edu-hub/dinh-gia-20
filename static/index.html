@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Math Solver — 3 Agents</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: linear-gradient(135deg, #eff6ff 0%, #faf5ff 100%);
+    min-height: 100vh;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 40px 20px;
+    color: #111827;
+  }
+  .card {
+    background: #fff;
+    width: 100%;
+    max-width: 640px;
+    border-radius: 16px;
+    box-shadow: 0 20px 50px -20px rgba(0,0,0,0.18);
+    padding: 36px;
+  }
+  h1 { margin: 0 0 6px; font-size: 26px; }
+  .sub { color: #6b7280; margin-bottom: 24px; font-size: 14px; }
+  .agents {
+    display: flex; gap: 8px; margin-bottom: 24px;
+    font-size: 12px; color: #4b5563;
+  }
+  .agent {
+    flex: 1; padding: 10px; background: #f3f4f6;
+    border-radius: 8px; text-align: center;
+  }
+  .agent strong { display: block; color: #2563eb; font-size: 13px; margin-bottom: 2px; }
+  .drop {
+    border: 2px dashed #c7d2fe;
+    border-radius: 12px;
+    padding: 36px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: 0.2s;
+    background: #fafbff;
+  }
+  .drop:hover, .drop.drag { border-color: #6366f1; background: #eef2ff; }
+  .drop p { margin: 8px 0 0; color: #6b7280; font-size: 14px; }
+  .drop strong { color: #4f46e5; }
+  .filename { margin-top: 12px; font-size: 13px; color: #2563eb; font-weight: 500; }
+  input[type=file] { display: none; }
+  button {
+    width: 100%;
+    margin-top: 18px;
+    padding: 14px;
+    border: 0;
+    border-radius: 10px;
+    background: #2563eb;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: 0.15s;
+  }
+  button:hover:not(:disabled) { background: #1d4ed8; }
+  button:disabled { background: #9ca3af; cursor: not-allowed; }
+  .result {
+    margin-top: 24px;
+    padding: 20px;
+    background: #f9fafb;
+    border-radius: 12px;
+    border: 1px solid #e5e7eb;
+    display: none;
+  }
+  .result.show { display: block; }
+  .row { margin: 8px 0; font-size: 14px; }
+  .row .label { color: #6b7280; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .row .val {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    background: #fff; padding: 8px 10px; border-radius: 6px;
+    border: 1px solid #e5e7eb; word-break: break-all;
+    margin-top: 4px;
+  }
+  .download {
+    display: inline-block;
+    margin-top: 14px;
+    padding: 12px 18px;
+    background: #10b981; color: #fff;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 14px;
+  }
+  .download:hover { background: #059669; }
+  .error { color: #dc2626; margin-top: 14px; font-size: 14px; }
+  .spinner {
+    display: inline-block; width: 16px; height: 16px;
+    border: 2px solid #fff; border-top-color: transparent;
+    border-radius: 50%; animation: spin 0.7s linear infinite;
+    vertical-align: middle; margin-right: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Math Solver — 3 Agents</h1>
+  <p class="sub">Upload PDF chứa phép tính, hệ thống sẽ OCR → tính → trả PDF kết quả.</p>
+
+  <div class="agents">
+    <div class="agent"><strong>Agent 1</strong>OCR → LaTeX</div>
+    <div class="agent"><strong>Agent 2</strong>Tính toán</div>
+    <div class="agent"><strong>Agent 3</strong>Render PDF</div>
+  </div>
+
+  <label class="drop" id="drop">
+    <input type="file" id="file" accept="application/pdf" />
+    <div style="font-size:30px">📄</div>
+    <p><strong>Click chọn</strong> hoặc kéo thả PDF vào đây</p>
+    <div class="filename" id="filename"></div>
+  </label>
+
+  <button id="submit" disabled>Xử lý</button>
+
+  <div class="result" id="result">
+    <div class="row">
+      <div class="label">Phép tính (LaTeX)</div>
+      <div class="val" id="r-expr"></div>
+    </div>
+    <div class="row">
+      <div class="label">Kết quả</div>
+      <div class="val" id="r-result"></div>
+    </div>
+    <div class="row" id="r-numeric-row" style="display:none">
+      <div class="label">Giá trị số</div>
+      <div class="val" id="r-numeric"></div>
+    </div>
+    <div class="row" id="r-steps-row" style="display:none">
+      <div class="label">Các bước</div>
+      <div class="val" id="r-steps" style="white-space:pre-wrap"></div>
+    </div>
+    <a class="download" id="download" href="#" download>⬇ Tải PDF kết quả</a>
+  </div>
+
+  <div class="error" id="error"></div>
+</div>
+
+<script>
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('file');
+const filename = document.getElementById('filename');
+const submit = document.getElementById('submit');
+const result = document.getElementById('result');
+const errorEl = document.getElementById('error');
+
+let selected = null;
+
+function setFile(f) {
+  selected = f;
+  filename.textContent = f ? f.name : '';
+  submit.disabled = !f;
+  result.classList.remove('show');
+  errorEl.textContent = '';
+}
+
+fileInput.addEventListener('change', e => {
+  if (e.target.files[0]) setFile(e.target.files[0]);
+});
+['dragover', 'dragenter'].forEach(ev =>
+  drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('drag'); }));
+['dragleave', 'drop'].forEach(ev =>
+  drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('drag'); }));
+drop.addEventListener('drop', e => {
+  const f = e.dataTransfer.files[0];
+  if (f && f.type === 'application/pdf') setFile(f);
+  else errorEl.textContent = 'Chỉ chấp nhận file PDF';
+});
+
+submit.addEventListener('click', async () => {
+  if (!selected) return;
+  errorEl.textContent = '';
+  result.classList.remove('show');
+  submit.disabled = true;
+  submit.innerHTML = '<span class="spinner"></span>Đang xử lý...';
+
+  try {
+    const fd = new FormData();
+    fd.append('file', selected);
+    const res = await fetch('/api/process', { method: 'POST', body: fd });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Unknown error' }));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    document.getElementById('r-expr').textContent = data.expression;
+    document.getElementById('r-result').textContent = data.result_latex;
+    if (data.result_numeric) {
+      document.getElementById('r-numeric-row').style.display = '';
+      document.getElementById('r-numeric').textContent = data.result_numeric;
+    } else {
+      document.getElementById('r-numeric-row').style.display = 'none';
+    }
+    if (data.steps) {
+      document.getElementById('r-steps-row').style.display = '';
+      document.getElementById('r-steps').textContent = data.steps;
+    } else {
+      document.getElementById('r-steps-row').style.display = 'none';
+    }
+    document.getElementById('download').href = data.download_url;
+    result.classList.add('show');
+  } catch (e) {
+    errorEl.textContent = '⚠ ' + e.message;
+  } finally {
+    submit.disabled = false;
+    submit.textContent = 'Xử lý';
+  }
+});
+</script>
+</body>
+</html>
