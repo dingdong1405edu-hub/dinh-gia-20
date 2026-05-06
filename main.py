@@ -1,4 +1,4 @@
-"""FastAPI orchestrator: worksheet -> answers PDF + debug report + trace.json."""
+"""FastAPI orchestrator: financial report -> analysis PDF + debug report + trace.json."""
 import json
 import logging
 import os
@@ -10,12 +10,12 @@ from pathlib import Path
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 
-from agents.calculator import solve
+from agents.analyzer import analyze
 from agents.extractor import extract
-from agents.renderer import render_answers, render_report
+from agents.renderer import render_analysis, render_report
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-log = logging.getLogger("math-solver")
+log = logging.getLogger("financial-analyzer")
 
 BASE_DIR = Path(__file__).parent
 UPLOAD_DIR = BASE_DIR / "uploads"
@@ -24,9 +24,9 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 ALLOWED_SUFFIXES = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif"}
-MAX_BYTES = 15 * 1024 * 1024
+MAX_BYTES = 20 * 1024 * 1024
 
-app = FastAPI(title="Worksheet Solver — 3 Agents (Opus 4.7 + thinking)")
+app = FastAPI(title="Financial Report Analyzer — 3 Agents (Opus 4.7)")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -52,7 +52,7 @@ async def process(file: UploadFile = File(...)) -> dict:
 
     job_id = uuid.uuid4().hex[:12]
     upload_path = UPLOAD_DIR / f"{job_id}{suffix}"
-    answers_path = OUTPUT_DIR / f"{job_id}_answers.pdf"
+    analysis_path = OUTPUT_DIR / f"{job_id}_analysis.pdf"
     report_path = OUTPUT_DIR / f"{job_id}_report.pdf"
     trace_path = OUTPUT_DIR / f"{job_id}_trace.json"
     upload_path.write_bytes(contents)
@@ -64,25 +64,22 @@ async def process(file: UploadFile = File(...)) -> dict:
     }
 
     try:
-        log.info("[%s] agent1: extract", job_id)
+        log.info("[%s] agent1: extract financials", job_id)
         a1 = extract(str(upload_path))
         trace["agent1"] = a1
-        log.info("[%s] agent1 done: %d problems in %.2fs",
-                 job_id, len(a1["problems"]), a1["elapsed_sec"])
-        if not a1["problems"]:
-            raise HTTPException(422, "Không tìm thấy bài tập nào trong file. Hãy thử ảnh/PDF rõ hơn.")
+        log.info("[%s] agent1 done in %.2fs", job_id, a1["elapsed_sec"])
+        if not a1.get("financials"):
+            raise HTTPException(422, "Không trích xuất được dữ liệu tài chính từ file. Hãy thử file rõ hơn.")
 
-        log.info("[%s] agent2: solve", job_id)
-        a2 = solve(a1["problems"])
+        log.info("[%s] agent2: compute ratios + analyze", job_id)
+        a2 = analyze(a1)
         trace["agent2"] = a2
-        log.info("[%s] agent2 done: %d solutions in %.2fs",
-                 job_id, len(a2["solutions"]), a2["elapsed_sec"])
+        log.info("[%s] agent2 done in %.2fs", job_id, a2["elapsed_sec"])
 
-        log.info("[%s] agent3: render answers", job_id)
-        a3 = render_answers(a1["problems"], a2["solutions"], str(answers_path))
+        log.info("[%s] agent3: render analysis PDF", job_id)
+        a3 = render_analysis(a1, a2, str(analysis_path))
         trace["agent3"] = a3
-        log.info("[%s] agent3 done: %d pages in %.2fs",
-                 job_id, a3["pages"], a3["elapsed_sec"])
+        log.info("[%s] agent3 done: %d pages in %.2fs", job_id, a3["pages"], a3["elapsed_sec"])
     except HTTPException:
         upload_path.unlink(missing_ok=True)
         raise
@@ -106,38 +103,52 @@ async def process(file: UploadFile = File(...)) -> dict:
 
     upload_path.unlink(missing_ok=True)
 
+    financials = a1.get("financials") or {}
+    insights = a2.get("insights") or {}
+
     return {
         "job_id": job_id,
-        "count": len(trace["agent1"]["problems"]),
-        "problems": trace["agent1"]["problems"],
-        "solutions": trace["agent2"]["solutions"],
-        "transcription": trace["agent1"].get("transcription", ""),
+        "company": financials.get("company") or {},
+        "period": financials.get("period") or {},
+        "currency": financials.get("currency"),
+        "unit": financials.get("unit"),
+        "health_score": insights.get("health_score"),
+        "health_grade": insights.get("health_grade"),
+        "executive_summary": insights.get("executive_summary"),
+        "key_insights": insights.get("key_insights") or [],
+        "strengths": insights.get("strengths") or [],
+        "weaknesses": insights.get("weaknesses") or [],
+        "red_flags": insights.get("red_flags") or [],
+        "trends": insights.get("trends") or [],
+        "recommendations": insights.get("recommendations") or [],
+        "ratios": a2.get("ratios") or {},
+        "raw_transcription": (financials.get("raw_transcription") or "")[:8000],
         "thinking": {
-            "agent1": trace["agent1"].get("thinking", ""),
-            "agent2": trace["agent2"].get("thinking", ""),
+            "agent1": a1.get("thinking", ""),
+            "agent2": a2.get("thinking", ""),
         },
         "raw_response": {
-            "agent1": trace["agent1"].get("raw_response", ""),
-            "agent2": trace["agent2"].get("raw_response", ""),
+            "agent1": a1.get("raw_response", ""),
+            "agent2": a2.get("raw_response", ""),
         },
         "meta": {
             "agent1": {
-                "model": trace["agent1"].get("model"),
-                "elapsed_sec": trace["agent1"].get("elapsed_sec"),
-                "usage": trace["agent1"].get("usage"),
+                "model": a1.get("model"),
+                "elapsed_sec": a1.get("elapsed_sec"),
+                "usage": a1.get("usage"),
             },
             "agent2": {
-                "model": trace["agent2"].get("model"),
-                "elapsed_sec": trace["agent2"].get("elapsed_sec"),
-                "usage": trace["agent2"].get("usage"),
+                "model": a2.get("model"),
+                "elapsed_sec": a2.get("elapsed_sec"),
+                "usage": a2.get("usage"),
             },
             "agent3": {
-                "elapsed_sec": trace["agent3"].get("elapsed_sec"),
-                "pages": trace["agent3"].get("pages"),
+                "elapsed_sec": a3.get("elapsed_sec"),
+                "pages": a3.get("pages"),
             },
             "total_elapsed_sec": trace["total_elapsed_sec"],
         },
-        "answers_url": f"/api/download/{job_id}/answers",
+        "analysis_url": f"/api/download/{job_id}/analysis",
         "report_url": f"/api/download/{job_id}/report",
         "trace_url": f"/api/download/{job_id}/trace",
     }
@@ -149,12 +160,12 @@ def download(job_id: str, kind: str) -> FileResponse:
         raise HTTPException(400, "Invalid job_id")
 
     mapping = {
-        "answers": (f"{job_id}_answers.pdf", "application/pdf", f"dap_an_{job_id}.pdf"),
+        "analysis": (f"{job_id}_analysis.pdf", "application/pdf", f"phan_tich_BCTC_{job_id}.pdf"),
         "report": (f"{job_id}_report.pdf", "application/pdf", f"bao_cao_debug_{job_id}.pdf"),
         "trace": (f"{job_id}_trace.json", "application/json", f"trace_{job_id}.json"),
     }
     if kind not in mapping:
-        raise HTTPException(400, "Invalid kind. Use: answers | report | trace")
+        raise HTTPException(400, "Invalid kind. Use: analysis | report | trace")
 
     fname, mime, dl_name = mapping[kind]
     fpath = OUTPUT_DIR / fname

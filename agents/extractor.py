@@ -1,4 +1,4 @@
-"""Agent 1: Worksheet (PDF/image) -> verbatim transcription + structured problem list."""
+"""Agent 1: Vietnamese financial report (PDF/image) -> structured JSON."""
 import base64
 import json
 import re
@@ -19,39 +19,116 @@ _IMAGE_TYPES = {
     ".gif": "image/gif",
 }
 
-_PROMPT = """You are a meticulous OCR + structuring agent for Vietnamese math worksheets ("phiếu bài tập toán").
+_PROMPT = """You are a meticulous financial data extraction agent for Vietnamese business financial reports \
+("Báo cáo tài chính" / BCTC).
 
-Your task has TWO outputs in one JSON response.
+The document may include:
+- Bảng cân đối kế toán (Balance Sheet)
+- Báo cáo kết quả hoạt động kinh doanh (Income Statement)
+- Báo cáo lưu chuyển tiền tệ (Cash Flow Statement)
+- Thuyết minh báo cáo tài chính (Notes)
 
-(A) "transcription": A complete VERBATIM transcription of every text and math element on the page(s), \
-top-to-bottom and left-to-right. Read EVERY character carefully. For math, write exact LaTeX. \
-Do NOT skip, summarize, or paraphrase. This is the ground-truth raw read.
+Extract all available financial figures EXACTLY. Numbers in Vietnamese reports use:
+- "." as thousand separator: "1.234.567" means 1234567
+- "," as decimal separator: "1.234,56" means 1234.56
+- Parentheses or minus sign for negatives: "(1.234)" or "-1.234" means -1234
+- Empty cells / "-" mean null (NOT zero)
 
-(B) "problems": A structured list of every exercise/problem.
+Return ONLY this JSON shape (no markdown fences, no explanation):
 
-Return ONLY this JSON shape (no markdown fences, no commentary):
 {
-  "transcription": "<the full literal transcription. Use \\n for line breaks. Math wrapped in $...$. \
-Vietnamese diacritics preserved exactly.>",
-  "problems": [
-    {
-      "number": "<the original label as a string: '1', '2a', 'Bài 3', 'Câu 5b', etc.>",
-      "statement_text": "<the problem statement as Vietnamese text. Inline math wrapped in $...$. \
-NO leading number/label. Sub-questions a/b/c sharing a stem stay in this string with \\n separators.>",
-      "statement_math": "<if the problem is purely a single math expression to compute/simplify/solve, \
-put just the LaTeX (no $); otherwise empty string \\"\\">"
-    }
-  ]
+  "company": {
+    "name": "<exact company name as printed>",
+    "tax_code": "<MST nếu có, else null>",
+    "address": "<địa chỉ nếu có, else null>",
+    "industry": "<ngành nếu nêu, else null>",
+    "report_type": "<e.g. 'Báo cáo tài chính năm 2023', 'Quý 4/2023'>"
+  },
+  "period": {
+    "current": {"label": "<e.g. '31/12/2023', 'Năm 2023', 'Quý 4 năm 2023'>"},
+    "previous": {"label": "<comparable period if present, else null>"}
+  },
+  "currency": "<VND | USD | ...>",
+  "unit": "<exact unit from header: đồng | nghìn đồng | triệu đồng | tỷ đồng | đồng VN>",
+  "balance_sheet": {
+    "current": {
+      "assets": {
+        "cash_and_equivalents": <number or null>,
+        "short_term_investments": <number or null>,
+        "short_term_receivables": <number or null>,
+        "inventory": <number or null>,
+        "other_current_assets": <number or null>,
+        "current_assets_total": <number or null>,
+        "long_term_receivables": <number or null>,
+        "fixed_assets": <number or null>,
+        "investment_properties": <number or null>,
+        "long_term_investments": <number or null>,
+        "other_non_current_assets": <number or null>,
+        "non_current_assets_total": <number or null>,
+        "total_assets": <number or null>
+      },
+      "liabilities": {
+        "short_term_debt": <number or null>,
+        "accounts_payable": <number or null>,
+        "other_current_liabilities": <number or null>,
+        "current_liabilities_total": <number or null>,
+        "long_term_debt": <number or null>,
+        "other_non_current_liabilities": <number or null>,
+        "non_current_liabilities_total": <number or null>,
+        "total_liabilities": <number or null>
+      },
+      "equity": {
+        "share_capital": <number or null>,
+        "retained_earnings": <number or null>,
+        "other_equity": <number or null>,
+        "total_equity": <number or null>
+      }
+    },
+    "previous": "<same shape if comparable period present, else null>"
+  },
+  "income_statement": {
+    "current": {
+      "revenue": <number or null>,
+      "revenue_deductions": <number or null>,
+      "net_revenue": <number or null>,
+      "cogs": <number or null>,
+      "gross_profit": <number or null>,
+      "financial_income": <number or null>,
+      "financial_expense": <number or null>,
+      "interest_expense": <number or null>,
+      "selling_expense": <number or null>,
+      "admin_expense": <number or null>,
+      "operating_profit": <number or null>,
+      "other_income": <number or null>,
+      "other_expense": <number or null>,
+      "profit_before_tax": <number or null>,
+      "current_tax": <number or null>,
+      "deferred_tax": <number or null>,
+      "net_profit_after_tax": <number or null>,
+      "eps": <number or null>
+    },
+    "previous": "<same shape if available, else null>"
+  },
+  "cash_flow": {
+    "current": {
+      "cf_operating": <number or null>,
+      "cf_investing": <number or null>,
+      "cf_financing": <number or null>,
+      "net_cf": <number or null>,
+      "ending_cash": <number or null>
+    },
+    "previous": "<same shape if available, else null>"
+  },
+  "raw_transcription": "<verbatim line-by-line extract of the key tables. Include section headers in Vietnamese exactly as printed. Use \\n for line breaks. This is the ground-truth raw read.>",
+  "notes": "<any concerns: ambiguous numbers, missing sections, unclear units, illegible cells, etc.>"
 }
 
 CRITICAL RULES:
-- Read carefully. Distinguish: 0/O, 1/l/I, 5/S, x/×, − vs -, ² vs 2.
-- Preserve fractions as \\\\frac{a}{b}, exponents as ^{n}, roots as \\\\sqrt{...}, integrals \\\\int, sums \\\\sum.
-- Do NOT put Vietnamese inside \\\\text{}; keep Vietnamese OUTSIDE math.
-- If you cannot read part of a problem, transcribe what you can and mark the gap with [?] in transcription.
-- Capture EVERY numbered problem you can see, even if there are 20+. Process every page.
-- For multi-part problems with shared stem, keep them as ONE entry; for clearly separate problems, split.
-- Strings in JSON must escape backslashes: \\\\frac, \\\\sqrt, \\\\n.
+- Use null (not 0) for absent / unreadable values.
+- Keep values in the unit shown by the report — do NOT convert. If unit is "triệu đồng" and the cell shows "1.234", value = 1234.
+- For Balance Sheet: total_assets MUST equal total_liabilities + total_equity. If not, set "notes" to flag the imbalance.
+- Negative values: report as negative numbers (e.g. -1234), NOT as parentheses or strings.
+- raw_transcription is mandatory — copy the printed tables verbatim line by line for audit.
 """
 
 
@@ -104,20 +181,6 @@ def extract(file_path: str) -> dict:
             raise ValueError(f"Extractor did not return JSON: {cleaned[:300]!r}")
         parsed = json.loads(match.group(0))
 
-    transcription = (parsed.get("transcription") or "").strip()
-    problems_raw = parsed.get("problems") or []
-    problems = []
-    for i, p in enumerate(problems_raw, 1):
-        if not isinstance(p, dict):
-            continue
-        problems.append(
-            {
-                "number": str(p.get("number") or i),
-                "statement_text": (p.get("statement_text") or "").strip(),
-                "statement_math": (p.get("statement_math") or "").strip(),
-            }
-        )
-
     return {
         "model": _MODEL,
         "elapsed_sec": round(elapsed, 2),
@@ -126,8 +189,7 @@ def extract(file_path: str) -> dict:
         "input_type": suffix,
         "thinking": thinking_text,
         "raw_response": raw_response,
-        "transcription": transcription,
-        "problems": problems,
+        "financials": parsed,
         "usage": {
             "input_tokens": getattr(message.usage, "input_tokens", None),
             "output_tokens": getattr(message.usage, "output_tokens", None),

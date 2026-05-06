@@ -3,35 +3,36 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Giải phiếu bài tập — 3 Agents (Opus 4.7)</title>
+<title>Phân tích Báo cáo Tài chính — 3 Agents (Opus 4.7)</title>
 <style>
   * { box-sizing: border-box; }
   body {
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: linear-gradient(135deg, #eff6ff 0%, #faf5ff 100%);
+    background: linear-gradient(135deg, #f0f9ff 0%, #f5f3ff 100%);
     min-height: 100vh;
     padding: 32px 16px;
     color: #111827;
   }
-  .wrap { max-width: 860px; margin: 0 auto; }
+  .wrap { max-width: 920px; margin: 0 auto; }
   .card {
     background: #fff;
     border-radius: 16px;
     box-shadow: 0 20px 50px -20px rgba(0,0,0,0.18);
     padding: 32px;
   }
-  h1 { margin: 0 0 6px; font-size: 24px; }
+  h1 { margin: 0 0 6px; font-size: 26px; }
   .sub { color: #6b7280; margin-bottom: 22px; font-size: 14px; }
   .agents {
     display: flex; gap: 8px; margin-bottom: 22px;
     font-size: 12px; color: #4b5563;
   }
   .agent {
-    flex: 1; padding: 10px; background: #f3f4f6;
+    flex: 1; padding: 12px; background: #f3f4f6;
     border-radius: 8px; text-align: center;
   }
   .agent strong { display: block; color: #2563eb; font-size: 13px; margin-bottom: 2px; }
+  .agent small { color: #9ca3af; font-size: 11px; }
   .drop {
     border: 2px dashed #c7d2fe;
     border-radius: 12px;
@@ -71,16 +72,35 @@
     font-size: 14px;
   }
   .stage.show { display: block; }
-  .summary {
-    margin-top: 24px;
-    padding: 16px;
-    background: #ecfdf5;
-    color: #065f46;
-    border-radius: 10px;
+
+  .result-card {
     display: none;
+    margin-top: 26px;
+    padding: 22px 24px;
+    background: linear-gradient(135deg, #ecfdf5 0%, #eff6ff 100%);
+    border-radius: 14px;
+    border: 1px solid #d1fae5;
   }
-  .summary.show { display: block; }
-  .downloads { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .result-card.show { display: block; }
+  .company-row { display: flex; align-items: center; gap: 16px; margin-bottom: 10px; }
+  .grade-badge {
+    width: 60px; height: 60px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 30px; font-weight: bold; flex-shrink: 0;
+  }
+  .grade-A { background: #10b981; }
+  .grade-B { background: #22c55e; }
+  .grade-C { background: #f59e0b; }
+  .grade-D { background: #f97316; }
+  .grade-F { background: #ef4444; }
+  .grade-na { background: #9ca3af; }
+  .company-info h2 { margin: 0; font-size: 20px; color: #111827; }
+  .company-info .period { color: #6b7280; font-size: 14px; }
+  .score-line { font-size: 14px; color: #374151; margin-top: 4px; }
+  .score-line b { font-size: 18px; color: #2563eb; }
+
+  .summary-text { color: #374151; font-size: 14px; line-height: 1.6; margin-top: 14px; }
+  .downloads { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
   .dl {
     flex: 1; min-width: 180px;
     padding: 12px 14px;
@@ -90,55 +110,77 @@
     font-size: 13px;
     text-align: center;
   }
-  .dl-answers { background: #10b981; color: #fff; }
-  .dl-answers:hover { background: #059669; }
+  .dl-analysis { background: #2563eb; color: #fff; }
+  .dl-analysis:hover { background: #1d4ed8; }
   .dl-report { background: #dc2626; color: #fff; }
   .dl-report:hover { background: #b91c1c; }
   .dl-trace { background: #6366f1; color: #fff; }
   .dl-trace:hover { background: #4f46e5; }
+
   .meta-grid {
     display: grid; grid-template-columns: repeat(3, 1fr);
-    gap: 8px; margin-top: 22px;
+    gap: 8px; margin-top: 18px;
   }
   .meta-card {
-    background: #f9fafb; border: 1px solid #e5e7eb;
+    background: #fff; border: 1px solid #e5e7eb;
     border-radius: 8px; padding: 10px 12px; font-size: 12px;
   }
   .meta-card strong { display: block; color: #2563eb; font-size: 13px; margin-bottom: 4px; }
-  .meta-card span { color: #6b7280; }
-  .problems { margin-top: 22px; display: none; }
-  .problems.show { display: block; }
-  .problem {
-    background: #f9fafb;
-    border: 1px solid #e5e7eb;
+  .meta-card span { color: #6b7280; display: block; }
+
+  .insights-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    margin-top: 22px;
+  }
+  .ins-block {
     border-radius: 10px;
     padding: 14px 16px;
-    margin-bottom: 12px;
+    border: 1px solid;
+    background: #fff;
   }
-  .problem h3 {
-    margin: 0 0 6px;
-    font-size: 14px;
-    color: #2563eb;
+  .ins-block h3 { margin: 0 0 8px; font-size: 14px; }
+  .ins-block ul { margin: 0; padding-left: 18px; }
+  .ins-block li { font-size: 13px; line-height: 1.5; margin-bottom: 4px; color: #374151; }
+  .ins-block.strengths { border-color: #d1fae5; }
+  .ins-block.strengths h3 { color: #065f46; }
+  .ins-block.weaknesses { border-color: #fef3c7; }
+  .ins-block.weaknesses h3 { color: #92400e; }
+  .ins-block.red-flags { border-color: #fee2e2; }
+  .ins-block.red-flags h3 { color: #991b1b; }
+  .ins-block.recommendations { border-color: #ede9fe; }
+  .ins-block.recommendations h3 { color: #5b21b6; }
+  .ins-block.trends { border-color: #dbeafe; grid-column: span 2; }
+  .ins-block.trends h3 { color: #1e40af; }
+
+  .ratios-section { margin-top: 22px; }
+  .ratios-section h3 { font-size: 16px; color: #1f2937; margin: 0 0 10px; }
+  .ratio-cat {
+    background: #fff; border: 1px solid #e5e7eb;
+    border-radius: 8px; padding: 12px 14px; margin-bottom: 8px;
   }
-  .problem .stmt {
-    font-size: 13px; color: #374151; margin-bottom: 8px; white-space: pre-wrap;
+  .ratio-cat h4 {
+    margin: 0 0 8px; font-size: 13px; color: #2563eb;
+    text-transform: uppercase; letter-spacing: 0.5px;
   }
-  .problem .ans {
-    font-size: 14px; color: #065f46; font-weight: 600;
-    background: #ecfdf5; padding: 6px 10px; border-radius: 6px;
-    display: inline-block; margin-bottom: 6px;
+  .ratio-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 6px 0; font-size: 13px;
+    border-bottom: 1px dotted #f3f4f6;
   }
-  .problem .num { color: #6b7280; font-size: 12px; margin-left: 6px; }
-  .problem .conf {
-    font-size: 11px; padding: 2px 8px; border-radius: 999px;
-    margin-left: 8px; vertical-align: middle;
+  .ratio-row:last-child { border-bottom: 0; }
+  .ratio-row .name { color: #374151; flex: 1; }
+  .ratio-row .val { font-weight: 600; color: #111827; margin-right: 10px; min-width: 80px; text-align: right; }
+  .rating-pill {
+    display: inline-block; padding: 2px 10px; border-radius: 999px;
+    font-size: 11px; font-weight: 600; min-width: 70px; text-align: center;
   }
-  .conf-high { background: #d1fae5; color: #065f46; }
-  .conf-medium { background: #fef3c7; color: #92400e; }
-  .conf-low { background: #fee2e2; color: #991b1b; }
-  .problem .steps {
-    font-size: 12px; color: #6b7280; white-space: pre-wrap; margin-top: 4px;
-  }
+  .rating-good { background: #d1fae5; color: #065f46; }
+  .rating-warning { background: #fef3c7; color: #92400e; }
+  .rating-poor { background: #fee2e2; color: #991b1b; }
+  .rating-na { background: #f3f4f6; color: #9ca3af; }
+
   details {
     margin-top: 18px;
     border: 1px solid #e5e7eb;
@@ -167,47 +209,65 @@
     vertical-align: middle; margin-right: 8px;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+  @media (max-width: 600px) {
+    .insights-grid { grid-template-columns: 1fr; }
+    .ins-block.trends { grid-column: span 1; }
+    .meta-grid { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
 <div class="wrap"><div class="card">
-  <h1>Giải phiếu bài tập toán</h1>
-  <p class="sub">Tải PDF/ảnh phiếu bài tập (nhiều câu) → 3 agent (Opus 4.7 + thinking) sẽ OCR, giải, và xuất PDF + báo cáo debug.</p>
+  <h1>Phân tích Báo cáo Tài chính</h1>
+  <p class="sub">Tải PDF/ảnh BCTC doanh nghiệp → 3 agent (Opus 4.7) trích số liệu → tính tỷ số → phân tích → xuất PDF báo cáo phân tích chuyên nghiệp.</p>
 
   <div class="agents">
-    <div class="agent"><strong>Agent 1</strong>OCR + LaTeX</div>
-    <div class="agent"><strong>Agent 2</strong>Giải toán</div>
-    <div class="agent"><strong>Agent 3</strong>Xuất PDF</div>
+    <div class="agent"><strong>Agent 1</strong>OCR + trích số<br><small>Bảng CĐKT, KQKD, LCTT</small></div>
+    <div class="agent"><strong>Agent 2</strong>Tính tỷ số + phân tích<br><small>Python + Claude</small></div>
+    <div class="agent"><strong>Agent 3</strong>Xuất PDF báo cáo<br><small>Bảng + biểu đồ + nhận định</small></div>
   </div>
 
   <label class="drop" id="drop">
     <input type="file" id="file" accept="application/pdf,image/png,image/jpeg,image/webp" />
-    <div style="font-size:30px">📄</div>
-    <p><strong>Click chọn</strong> hoặc kéo thả PDF/ảnh phiếu bài tập vào đây</p>
+    <div style="font-size:30px">📊</div>
+    <p><strong>Click chọn</strong> hoặc kéo thả PDF/ảnh BCTC doanh nghiệp vào đây</p>
+    <p style="font-size:12px; color:#9ca3af; margin-top:6px;">Hỗ trợ: BCĐKT, KQKD, LCTT — định dạng VAS</p>
     <div class="filename" id="filename"></div>
   </label>
 
-  <button class="primary" id="submit" disabled>Xử lý</button>
+  <button class="primary" id="submit" disabled>Phân tích</button>
 
   <div class="stage" id="stage"></div>
 
-  <div class="summary" id="summary">
-    <div id="summary-text"></div>
+  <div class="result-card" id="result-card">
+    <div class="company-row">
+      <div class="grade-badge grade-na" id="grade-badge">?</div>
+      <div class="company-info">
+        <h2 id="company-name">—</h2>
+        <div class="period" id="period">—</div>
+        <div class="score-line" id="score-line"></div>
+      </div>
+    </div>
+    <div class="summary-text" id="summary-text"></div>
+
     <div class="downloads">
-      <a class="dl dl-answers" id="dl-answers" href="#" download>⬇ PDF đáp án</a>
-      <a class="dl dl-report" id="dl-report" href="#" download>📊 Báo cáo debug PDF</a>
+      <a class="dl dl-analysis" id="dl-analysis" href="#" download>📈 Tải Báo cáo phân tích</a>
+      <a class="dl dl-report" id="dl-report" href="#" download>🔬 Báo cáo debug</a>
       <a class="dl dl-trace" id="dl-trace" href="#" download>📦 Trace JSON</a>
     </div>
+
     <div class="meta-grid" id="meta-grid"></div>
+
+    <div class="insights-grid" id="insights-grid"></div>
+
+    <div class="ratios-section" id="ratios-section"></div>
   </div>
 
-  <div class="problems" id="problems"></div>
-
-  <details id="d-trans"><summary>📝 Agent 1 — Transcription (raw OCR đọc được gì)</summary><pre id="trans"></pre></details>
+  <details id="d-trans"><summary>📝 Agent 1 — Transcription nguyên văn (Claude OCR đọc được gì)</summary><pre id="trans"></pre></details>
   <details id="d-think1"><summary>🧠 Agent 1 — Thinking trace</summary><pre id="think1"></pre></details>
-  <details id="d-raw1"><summary>🔍 Agent 1 — Raw response</summary><pre id="raw1"></pre></details>
-  <details id="d-think2"><summary>🧠 Agent 2 — Thinking trace (cách Claude lập luận)</summary><pre id="think2"></pre></details>
-  <details id="d-raw2"><summary>🔍 Agent 2 — Raw response</summary><pre id="raw2"></pre></details>
+  <details id="d-raw1"><summary>🔍 Agent 1 — Raw response (JSON)</summary><pre id="raw1"></pre></details>
+  <details id="d-think2"><summary>🧠 Agent 2 — Thinking trace (cách Claude phân tích)</summary><pre id="think2"></pre></details>
+  <details id="d-raw2"><summary>🔍 Agent 2 — Raw response (insights JSON)</summary><pre id="raw2"></pre></details>
 
   <div class="error" id="error"></div>
 </div></div>
@@ -218,9 +278,7 @@ const fileInput = document.getElementById('file');
 const filename = document.getElementById('filename');
 const submit = document.getElementById('submit');
 const stage = document.getElementById('stage');
-const summary = document.getElementById('summary');
-const summaryText = document.getElementById('summary-text');
-const problemsEl = document.getElementById('problems');
+const resultCard = document.getElementById('result-card');
 const errorEl = document.getElementById('error');
 
 let selected = null;
@@ -229,8 +287,7 @@ function setFile(f) {
   selected = f;
   filename.textContent = f ? f.name : '';
   submit.disabled = !f;
-  summary.classList.remove('show');
-  problemsEl.classList.remove('show');
+  resultCard.classList.remove('show');
   errorEl.textContent = '';
 }
 
@@ -250,16 +307,92 @@ drop.addEventListener('drop', e => {
 
 function escape(s) { return (s == null ? '' : String(s)).replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])); }
 
+const RATIO_LABELS = {
+  current_ratio: 'Hệ số thanh toán hiện hành',
+  quick_ratio: 'Hệ số thanh toán nhanh',
+  cash_ratio: 'Hệ số thanh toán tiền mặt',
+  debt_ratio: 'Hệ số nợ / Tổng TS',
+  debt_to_equity: 'Nợ / VCSH',
+  equity_multiplier: 'Hệ số nhân VCSH',
+  gross_margin: 'Biên LN gộp',
+  operating_margin: 'Biên LN HĐKD',
+  net_margin: 'Biên LN ròng',
+  roa: 'ROA',
+  roe: 'ROE',
+  asset_turnover: 'Vòng quay tổng TS',
+  inventory_turnover: 'Vòng quay HTK',
+  receivables_turnover: 'Vòng quay phải thu',
+};
+const PERCENT_RATIOS = new Set(['gross_margin', 'operating_margin', 'net_margin', 'roa', 'roe', 'debt_ratio']);
+const CAT_LABELS = {
+  liquidity: 'Thanh khoản',
+  leverage: 'Đòn bẩy / Cơ cấu vốn',
+  profitability: 'Khả năng sinh lời',
+  efficiency: 'Hiệu quả hoạt động',
+};
+const RATING_VI = { good: 'Tốt', warning: 'Trung bình', poor: 'Kém', 'n/a': '—' };
+
+function fmtRatio(name, value) {
+  if (value == null) return '—';
+  if (PERCENT_RATIOS.has(name)) return (value * 100).toFixed(2) + '%';
+  return Number(value).toFixed(2);
+}
+
+function renderInsights(data) {
+  const grid = document.getElementById('insights-grid');
+  const blocks = [
+    { cls: 'strengths', title: '✅ Điểm mạnh', items: data.strengths },
+    { cls: 'weaknesses', title: '⚠ Điểm yếu', items: data.weaknesses },
+    { cls: 'red-flags', title: '🚨 Cảnh báo rủi ro', items: data.red_flags },
+    { cls: 'recommendations', title: '🎯 Khuyến nghị', items: data.recommendations },
+  ];
+  if ((data.trends || []).length) {
+    blocks.push({ cls: 'trends', title: '📈 Xu hướng so với kỳ trước', items: data.trends });
+  }
+  grid.innerHTML = blocks.map(b => `
+    <div class="ins-block ${b.cls}">
+      <h3>${b.title}</h3>
+      <ul>${(b.items || []).map(x => `<li>${escape(x)}</li>`).join('') || '<li style="color:#9ca3af; font-style:italic">(Không có)</li>'}</ul>
+    </div>
+  `).join('');
+}
+
+function renderRatios(ratios) {
+  const cur = (ratios && ratios.current) || {};
+  const prev = (ratios && ratios.previous) || {};
+  const sec = document.getElementById('ratios-section');
+  const cats = ['liquidity', 'leverage', 'profitability', 'efficiency'];
+  const html = cats.map(cat => {
+    const items = cur[cat] || {};
+    const rows = Object.entries(items).map(([name, payload]) => {
+      const value = payload && payload.value;
+      const rating = (payload && payload.rating) || 'n/a';
+      const prevVal = ((prev[cat] || {})[name] || {}).value;
+      const ratingClass = `rating-${rating === 'n/a' ? 'na' : rating}`;
+      const prevHtml = prevVal != null ? ` <small style="color:#9ca3af">(kỳ trước: ${fmtRatio(name, prevVal)})</small>` : '';
+      return `<div class="ratio-row">
+        <span class="name">${escape(RATIO_LABELS[name] || name)}${prevHtml}</span>
+        <span class="val">${fmtRatio(name, value)}</span>
+        <span class="rating-pill ${ratingClass}">${RATING_VI[rating] || rating}</span>
+      </div>`;
+    }).join('');
+    if (!rows) return '';
+    return `<div class="ratio-cat">
+      <h4>${CAT_LABELS[cat] || cat}</h4>
+      ${rows}
+    </div>`;
+  }).join('');
+  sec.innerHTML = `<h3>Tỷ số tài chính chi tiết</h3>${html || '<div style="color:#9ca3af">Không đủ dữ liệu để tính tỷ số.</div>'}`;
+}
+
 submit.addEventListener('click', async () => {
   if (!selected) return;
   errorEl.textContent = '';
-  summary.classList.remove('show');
-  problemsEl.classList.remove('show');
-  problemsEl.innerHTML = '';
+  resultCard.classList.remove('show');
   submit.disabled = true;
-  submit.innerHTML = '<span class="spinner"></span>Đang xử lý (60-180s, Opus + thinking)...';
+  submit.innerHTML = '<span class="spinner"></span>Đang phân tích (60-180s, Opus + thinking)...';
   stage.classList.add('show');
-  stage.textContent = '⏳ Agent 1 OCR → Agent 2 đang suy luận → Agent 3 render PDF + báo cáo...';
+  stage.textContent = '⏳ Agent 1 trích số liệu BCTC → Agent 2 tính tỷ số + phân tích → Agent 3 xuất PDF báo cáo...';
 
   try {
     const fd = new FormData();
@@ -271,53 +404,52 @@ submit.addEventListener('click', async () => {
     }
     const data = await res.json();
 
-    summaryText.innerHTML = `✅ Đã giải <b>${data.count}</b> bài trong ${data.meta.total_elapsed_sec}s. Tải các file:`;
-    document.getElementById('dl-answers').href = data.answers_url;
+    const grade = (data.health_grade || '?').toUpperCase();
+    const badge = document.getElementById('grade-badge');
+    badge.textContent = grade;
+    badge.className = 'grade-badge grade-' + (['A','B','C','D','F'].includes(grade) ? grade : 'na');
+
+    document.getElementById('company-name').textContent = data.company?.name || '(Không xác định)';
+    const periodLabel = data.period?.current?.label || '';
+    const reportType = data.company?.report_type || '';
+    document.getElementById('period').textContent = [reportType, periodLabel, data.unit ? `Đơn vị: ${data.unit}` : ''].filter(Boolean).join(' · ');
+    const score = data.health_score;
+    document.getElementById('score-line').innerHTML =
+      score != null ? `Điểm sức khỏe tài chính: <b>${score}/100</b> (xếp hạng <b>${grade}</b>)` : '';
+
+    document.getElementById('summary-text').textContent = data.executive_summary || '';
+
+    document.getElementById('dl-analysis').href = data.analysis_url;
     document.getElementById('dl-report').href = data.report_url;
     document.getElementById('dl-trace').href = data.trace_url;
 
     document.getElementById('meta-grid').innerHTML = `
       <div class="meta-card">
         <strong>Agent 1 OCR</strong>
-        <span>Model: ${escape(data.meta.agent1.model)}</span><br>
-        <span>Time: ${data.meta.agent1.elapsed_sec}s</span><br>
+        <span>Model: ${escape(data.meta.agent1.model)}</span>
+        <span>Time: ${data.meta.agent1.elapsed_sec}s</span>
         <span>Tokens: in=${data.meta.agent1.usage?.input_tokens ?? '?'} out=${data.meta.agent1.usage?.output_tokens ?? '?'}</span>
       </div>
       <div class="meta-card">
-        <strong>Agent 2 Solver</strong>
-        <span>Model: ${escape(data.meta.agent2.model)}</span><br>
-        <span>Time: ${data.meta.agent2.elapsed_sec}s</span><br>
+        <strong>Agent 2 Analyzer</strong>
+        <span>Model: ${escape(data.meta.agent2.model)}</span>
+        <span>Time: ${data.meta.agent2.elapsed_sec}s</span>
         <span>Tokens: in=${data.meta.agent2.usage?.input_tokens ?? '?'} out=${data.meta.agent2.usage?.output_tokens ?? '?'}</span>
       </div>
       <div class="meta-card">
-        <strong>Agent 3 Render</strong>
-        <span>Pages: ${data.meta.agent3.pages}</span><br>
+        <strong>Agent 3 Renderer</strong>
+        <span>Pages: ${data.meta.agent3.pages}</span>
         <span>Time: ${data.meta.agent3.elapsed_sec}s</span>
+        <span>Tổng: ${data.meta.total_elapsed_sec}s</span>
       </div>
     `;
-    summary.classList.add('show');
 
-    const solByNum = {};
-    (data.solutions || []).forEach(s => { solByNum[String(s.number)] = s; });
-    problemsEl.innerHTML = (data.problems || []).map(p => {
-      const sol = solByNum[String(p.number)] || {};
-      const stmt = p.statement_text || (p.statement_math ? '$' + p.statement_math + '$' : '');
-      const ans = sol.answer_latex || '?';
-      const num = sol.answer_numeric ? `<span class="num">≈ ${escape(sol.answer_numeric)}</span>` : '';
-      const conf = sol.confidence || 'medium';
-      const confLabel = { high: 'tin cậy cao', medium: 'tin cậy TB', low: '⚠ tin cậy thấp' }[conf] || conf;
-      const confTag = `<span class="conf conf-${conf}">${confLabel}</span>`;
-      const steps = sol.steps_text ? `<div class="steps">${escape(sol.steps_text)}</div>` : '';
-      return `<div class="problem">
-        <h3>Bài ${escape(p.number)}${confTag}</h3>
-        <div class="stmt">${escape(stmt)}</div>
-        <div><span class="ans">${escape(ans)}</span>${num}</div>
-        ${steps}
-      </div>`;
-    }).join('');
-    problemsEl.classList.add('show');
+    renderInsights(data);
+    renderRatios(data.ratios);
 
-    document.getElementById('trans').textContent = data.transcription || '(empty)';
+    resultCard.classList.add('show');
+
+    document.getElementById('trans').textContent = data.raw_transcription || '(empty)';
     document.getElementById('think1').textContent = data.thinking?.agent1 || '(empty)';
     document.getElementById('raw1').textContent = data.raw_response?.agent1 || '(empty)';
     document.getElementById('think2').textContent = data.thinking?.agent2 || '(empty)';
@@ -327,7 +459,7 @@ submit.addEventListener('click', async () => {
   } finally {
     stage.classList.remove('show');
     submit.disabled = false;
-    submit.textContent = 'Xử lý';
+    submit.textContent = 'Phân tích';
   }
 });
 </script>
