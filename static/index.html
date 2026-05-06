@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Giải phiếu bài tập — 3 Agents</title>
+<title>Giải phiếu bài tập — 3 Agents (Opus 4.7)</title>
 <style>
   * { box-sizing: border-box; }
   body {
@@ -14,7 +14,7 @@
     padding: 32px 16px;
     color: #111827;
   }
-  .wrap { max-width: 760px; margin: 0 auto; }
+  .wrap { max-width: 860px; margin: 0 auto; }
   .card {
     background: #fff;
     border-radius: 16px;
@@ -46,7 +46,7 @@
   .drop strong { color: #4f46e5; }
   .filename { margin-top: 12px; font-size: 13px; color: #2563eb; font-weight: 500; }
   input[type=file] { display: none; }
-  button {
+  button.primary {
     width: 100%;
     margin-top: 18px;
     padding: 14px;
@@ -59,8 +59,8 @@
     cursor: pointer;
     transition: 0.15s;
   }
-  button:hover:not(:disabled) { background: #1d4ed8; }
-  button:disabled { background: #9ca3af; cursor: not-allowed; }
+  button.primary:hover:not(:disabled) { background: #1d4ed8; }
+  button.primary:disabled { background: #9ca3af; cursor: not-allowed; }
   .stage {
     display: none;
     margin-top: 14px;
@@ -80,17 +80,32 @@
     display: none;
   }
   .summary.show { display: block; }
-  .download {
-    display: inline-block;
-    margin-top: 12px;
-    padding: 12px 18px;
-    background: #10b981; color: #fff;
+  .downloads { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .dl {
+    flex: 1; min-width: 180px;
+    padding: 12px 14px;
     border-radius: 8px;
     text-decoration: none;
     font-weight: 600;
-    font-size: 14px;
+    font-size: 13px;
+    text-align: center;
   }
-  .download:hover { background: #059669; }
+  .dl-answers { background: #10b981; color: #fff; }
+  .dl-answers:hover { background: #059669; }
+  .dl-report { background: #dc2626; color: #fff; }
+  .dl-report:hover { background: #b91c1c; }
+  .dl-trace { background: #6366f1; color: #fff; }
+  .dl-trace:hover { background: #4f46e5; }
+  .meta-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 8px; margin-top: 22px;
+  }
+  .meta-card {
+    background: #f9fafb; border: 1px solid #e5e7eb;
+    border-radius: 8px; padding: 10px 12px; font-size: 12px;
+  }
+  .meta-card strong { display: block; color: #2563eb; font-size: 13px; margin-bottom: 4px; }
+  .meta-card span { color: #6b7280; }
   .problems { margin-top: 22px; display: none; }
   .problems.show { display: block; }
   .problem {
@@ -114,8 +129,35 @@
     display: inline-block; margin-bottom: 6px;
   }
   .problem .num { color: #6b7280; font-size: 12px; margin-left: 6px; }
+  .problem .conf {
+    font-size: 11px; padding: 2px 8px; border-radius: 999px;
+    margin-left: 8px; vertical-align: middle;
+  }
+  .conf-high { background: #d1fae5; color: #065f46; }
+  .conf-medium { background: #fef3c7; color: #92400e; }
+  .conf-low { background: #fee2e2; color: #991b1b; }
   .problem .steps {
     font-size: 12px; color: #6b7280; white-space: pre-wrap; margin-top: 4px;
+  }
+  details {
+    margin-top: 18px;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 12px 16px;
+    background: #f9fafb;
+  }
+  details summary {
+    cursor: pointer; font-weight: 600; color: #1f2937; font-size: 14px;
+    user-select: none;
+  }
+  details pre {
+    margin-top: 12px;
+    background: #1f2937; color: #e5e7eb;
+    padding: 12px; border-radius: 6px;
+    font-size: 11px; line-height: 1.5;
+    white-space: pre-wrap; word-break: break-word;
+    max-height: 400px; overflow-y: auto;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
   }
   .error { color: #dc2626; margin-top: 14px; font-size: 14px; }
   .spinner {
@@ -130,10 +172,10 @@
 <body>
 <div class="wrap"><div class="card">
   <h1>Giải phiếu bài tập toán</h1>
-  <p class="sub">Tải PDF/ảnh phiếu bài tập (có thể nhiều câu) → hệ thống OCR, giải, và xuất PDF đáp án.</p>
+  <p class="sub">Tải PDF/ảnh phiếu bài tập (nhiều câu) → 3 agent (Opus 4.7 + thinking) sẽ OCR, giải, và xuất PDF + báo cáo debug.</p>
 
   <div class="agents">
-    <div class="agent"><strong>Agent 1</strong>OCR đề bài</div>
+    <div class="agent"><strong>Agent 1</strong>OCR + LaTeX</div>
     <div class="agent"><strong>Agent 2</strong>Giải toán</div>
     <div class="agent"><strong>Agent 3</strong>Xuất PDF</div>
   </div>
@@ -145,16 +187,27 @@
     <div class="filename" id="filename"></div>
   </label>
 
-  <button id="submit" disabled>Xử lý</button>
+  <button class="primary" id="submit" disabled>Xử lý</button>
 
   <div class="stage" id="stage"></div>
 
   <div class="summary" id="summary">
     <div id="summary-text"></div>
-    <a class="download" id="download" href="#" download>⬇ Tải PDF đáp án</a>
+    <div class="downloads">
+      <a class="dl dl-answers" id="dl-answers" href="#" download>⬇ PDF đáp án</a>
+      <a class="dl dl-report" id="dl-report" href="#" download>📊 Báo cáo debug PDF</a>
+      <a class="dl dl-trace" id="dl-trace" href="#" download>📦 Trace JSON</a>
+    </div>
+    <div class="meta-grid" id="meta-grid"></div>
   </div>
 
   <div class="problems" id="problems"></div>
+
+  <details id="d-trans"><summary>📝 Agent 1 — Transcription (raw OCR đọc được gì)</summary><pre id="trans"></pre></details>
+  <details id="d-think1"><summary>🧠 Agent 1 — Thinking trace</summary><pre id="think1"></pre></details>
+  <details id="d-raw1"><summary>🔍 Agent 1 — Raw response</summary><pre id="raw1"></pre></details>
+  <details id="d-think2"><summary>🧠 Agent 2 — Thinking trace (cách Claude lập luận)</summary><pre id="think2"></pre></details>
+  <details id="d-raw2"><summary>🔍 Agent 2 — Raw response</summary><pre id="raw2"></pre></details>
 
   <div class="error" id="error"></div>
 </div></div>
@@ -195,7 +248,7 @@ drop.addEventListener('drop', e => {
   else errorEl.textContent = 'Chỉ chấp nhận PDF hoặc ảnh (PNG/JPG/WEBP)';
 });
 
-function escape(s) { return (s || '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])); }
+function escape(s) { return (s == null ? '' : String(s)).replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])); }
 
 submit.addEventListener('click', async () => {
   if (!selected) return;
@@ -204,9 +257,9 @@ submit.addEventListener('click', async () => {
   problemsEl.classList.remove('show');
   problemsEl.innerHTML = '';
   submit.disabled = true;
-  submit.innerHTML = '<span class="spinner"></span>Đang xử lý (có thể mất 30-90 giây)...';
+  submit.innerHTML = '<span class="spinner"></span>Đang xử lý (60-180s, Opus + thinking)...';
   stage.classList.add('show');
-  stage.textContent = '⏳ Agent 1 đang đọc đề bài, Agent 2 đang giải, Agent 3 đang xuất PDF...';
+  stage.textContent = '⏳ Agent 1 OCR → Agent 2 đang suy luận → Agent 3 render PDF + báo cáo...';
 
   try {
     const fd = new FormData();
@@ -218,8 +271,30 @@ submit.addEventListener('click', async () => {
     }
     const data = await res.json();
 
-    summaryText.innerHTML = `✅ Đã giải <b>${data.count}</b> bài. PDF đáp án sẵn sàng:`;
-    document.getElementById('download').href = data.download_url;
+    summaryText.innerHTML = `✅ Đã giải <b>${data.count}</b> bài trong ${data.meta.total_elapsed_sec}s. Tải các file:`;
+    document.getElementById('dl-answers').href = data.answers_url;
+    document.getElementById('dl-report').href = data.report_url;
+    document.getElementById('dl-trace').href = data.trace_url;
+
+    document.getElementById('meta-grid').innerHTML = `
+      <div class="meta-card">
+        <strong>Agent 1 OCR</strong>
+        <span>Model: ${escape(data.meta.agent1.model)}</span><br>
+        <span>Time: ${data.meta.agent1.elapsed_sec}s</span><br>
+        <span>Tokens: in=${data.meta.agent1.usage?.input_tokens ?? '?'} out=${data.meta.agent1.usage?.output_tokens ?? '?'}</span>
+      </div>
+      <div class="meta-card">
+        <strong>Agent 2 Solver</strong>
+        <span>Model: ${escape(data.meta.agent2.model)}</span><br>
+        <span>Time: ${data.meta.agent2.elapsed_sec}s</span><br>
+        <span>Tokens: in=${data.meta.agent2.usage?.input_tokens ?? '?'} out=${data.meta.agent2.usage?.output_tokens ?? '?'}</span>
+      </div>
+      <div class="meta-card">
+        <strong>Agent 3 Render</strong>
+        <span>Pages: ${data.meta.agent3.pages}</span><br>
+        <span>Time: ${data.meta.agent3.elapsed_sec}s</span>
+      </div>
+    `;
     summary.classList.add('show');
 
     const solByNum = {};
@@ -229,15 +304,24 @@ submit.addEventListener('click', async () => {
       const stmt = p.statement_text || (p.statement_math ? '$' + p.statement_math + '$' : '');
       const ans = sol.answer_latex || '?';
       const num = sol.answer_numeric ? `<span class="num">≈ ${escape(sol.answer_numeric)}</span>` : '';
+      const conf = sol.confidence || 'medium';
+      const confLabel = { high: 'tin cậy cao', medium: 'tin cậy TB', low: '⚠ tin cậy thấp' }[conf] || conf;
+      const confTag = `<span class="conf conf-${conf}">${confLabel}</span>`;
       const steps = sol.steps_text ? `<div class="steps">${escape(sol.steps_text)}</div>` : '';
       return `<div class="problem">
-        <h3>Bài ${escape(p.number)}</h3>
+        <h3>Bài ${escape(p.number)}${confTag}</h3>
         <div class="stmt">${escape(stmt)}</div>
         <div><span class="ans">${escape(ans)}</span>${num}</div>
         ${steps}
       </div>`;
     }).join('');
     problemsEl.classList.add('show');
+
+    document.getElementById('trans').textContent = data.transcription || '(empty)';
+    document.getElementById('think1').textContent = data.thinking?.agent1 || '(empty)';
+    document.getElementById('raw1').textContent = data.raw_response?.agent1 || '(empty)';
+    document.getElementById('think2').textContent = data.thinking?.agent2 || '(empty)';
+    document.getElementById('raw2').textContent = data.raw_response?.agent2 || '(empty)';
   } catch (e) {
     errorEl.textContent = '⚠ ' + e.message;
   } finally {
