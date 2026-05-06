@@ -1,4 +1,4 @@
-"""FastAPI orchestrator for the 3-agent math solver."""
+"""FastAPI orchestrator: worksheet -> answers PDF."""
 import logging
 import os
 import uuid
@@ -7,8 +7,8 @@ from pathlib import Path
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 
-from agents.calculator import calculate
-from agents.extractor import extract_latex
+from agents.calculator import solve_problems
+from agents.extractor import extract_problems
 from agents.renderer import render_pdf
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -20,9 +20,10 @@ OUTPUT_DIR = BASE_DIR / "outputs"
 UPLOAD_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-MAX_PDF_BYTES = 10 * 1024 * 1024
+ALLOWED_SUFFIXES = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif"}
+MAX_BYTES = 15 * 1024 * 1024
 
-app = FastAPI(title="3-Agent Math Solver")
+app = FastAPI(title="Worksheet Solver — 3 Agents")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -37,48 +38,47 @@ def health() -> dict:
 
 @app.post("/api/process")
 async def process(file: UploadFile = File(...)) -> dict:
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(400, "Only .pdf files are accepted")
+    name = (file.filename or "").lower()
+    suffix = Path(name).suffix
+    if suffix not in ALLOWED_SUFFIXES:
+        raise HTTPException(400, f"Unsupported file type. Allowed: {sorted(ALLOWED_SUFFIXES)}")
 
     contents = await file.read()
-    if len(contents) > MAX_PDF_BYTES:
-        raise HTTPException(413, f"File too large (max {MAX_PDF_BYTES // 1024 // 1024} MB)")
+    if len(contents) > MAX_BYTES:
+        raise HTTPException(413, f"File too large (max {MAX_BYTES // 1024 // 1024} MB)")
 
     job_id = uuid.uuid4().hex[:12]
-    pdf_path = UPLOAD_DIR / f"{job_id}.pdf"
+    upload_path = UPLOAD_DIR / f"{job_id}{suffix}"
     output_path = OUTPUT_DIR / f"{job_id}_result.pdf"
-    pdf_path.write_bytes(contents)
+    upload_path.write_bytes(contents)
 
     try:
-        log.info("[%s] agent1: extracting LaTeX", job_id)
-        latex_expr = extract_latex(str(pdf_path))
-        log.info("[%s] agent1 done: %s", job_id, latex_expr)
+        log.info("[%s] agent1: extracting problems from %s", job_id, suffix)
+        problems = extract_problems(str(upload_path))
+        log.info("[%s] agent1 done: %d problems", job_id, len(problems))
+        if not problems:
+            raise HTTPException(422, "Không tìm thấy bài tập nào trong file. Hãy thử ảnh/PDF rõ hơn.")
 
-        log.info("[%s] agent2: calculating", job_id)
-        calc = calculate(latex_expr)
-        log.info("[%s] agent2 done: %s", job_id, calc["result_latex"])
+        log.info("[%s] agent2: solving %d problems", job_id, len(problems))
+        solutions = solve_problems(problems)
+        log.info("[%s] agent2 done: %d solutions", job_id, len(solutions))
 
         log.info("[%s] agent3: rendering PDF", job_id)
-        render_pdf(
-            calc["expression"],
-            calc["result_latex"],
-            calc["result_numeric"],
-            calc.get("steps"),
-            str(output_path),
-        )
-        log.info("[%s] agent3 done", job_id)
+        render_pdf(problems, solutions, str(output_path))
+        log.info("[%s] agent3 done -> %s", job_id, output_path)
+    except HTTPException:
+        raise
     except Exception as exc:
         log.exception("[%s] pipeline failed", job_id)
         raise HTTPException(500, f"Pipeline error: {exc}")
     finally:
-        pdf_path.unlink(missing_ok=True)
+        upload_path.unlink(missing_ok=True)
 
     return {
         "job_id": job_id,
-        "expression": latex_expr,
-        "result_latex": calc["result_latex"],
-        "result_numeric": calc["result_numeric"],
-        "steps": calc.get("steps"),
+        "count": len(problems),
+        "problems": problems,
+        "solutions": solutions,
         "download_url": f"/api/download/{job_id}",
     }
 
@@ -93,7 +93,7 @@ def download(job_id: str) -> FileResponse:
     return FileResponse(
         output_path,
         media_type="application/pdf",
-        filename=f"math_result_{job_id}.pdf",
+        filename=f"dap_an_{job_id}.pdf",
     )
 
 

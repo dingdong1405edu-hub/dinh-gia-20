@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Math Solver — 3 Agents</title>
+<title>Giải phiếu bài tập — 3 Agents</title>
 <style>
   * { box-sizing: border-box; }
   body {
@@ -11,24 +11,20 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     background: linear-gradient(135deg, #eff6ff 0%, #faf5ff 100%);
     min-height: 100vh;
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-    padding: 40px 20px;
+    padding: 32px 16px;
     color: #111827;
   }
+  .wrap { max-width: 760px; margin: 0 auto; }
   .card {
     background: #fff;
-    width: 100%;
-    max-width: 640px;
     border-radius: 16px;
     box-shadow: 0 20px 50px -20px rgba(0,0,0,0.18);
-    padding: 36px;
+    padding: 32px;
   }
-  h1 { margin: 0 0 6px; font-size: 26px; }
-  .sub { color: #6b7280; margin-bottom: 24px; font-size: 14px; }
+  h1 { margin: 0 0 6px; font-size: 24px; }
+  .sub { color: #6b7280; margin-bottom: 22px; font-size: 14px; }
   .agents {
-    display: flex; gap: 8px; margin-bottom: 24px;
+    display: flex; gap: 8px; margin-bottom: 22px;
     font-size: 12px; color: #4b5563;
   }
   .agent {
@@ -39,7 +35,7 @@
   .drop {
     border: 2px dashed #c7d2fe;
     border-radius: 12px;
-    padding: 36px 20px;
+    padding: 32px 20px;
     text-align: center;
     cursor: pointer;
     transition: 0.2s;
@@ -65,26 +61,28 @@
   }
   button:hover:not(:disabled) { background: #1d4ed8; }
   button:disabled { background: #9ca3af; cursor: not-allowed; }
-  .result {
+  .stage {
+    display: none;
+    margin-top: 14px;
+    padding: 14px 16px;
+    background: #fef3c7;
+    color: #92400e;
+    border-radius: 8px;
+    font-size: 14px;
+  }
+  .stage.show { display: block; }
+  .summary {
     margin-top: 24px;
-    padding: 20px;
-    background: #f9fafb;
-    border-radius: 12px;
-    border: 1px solid #e5e7eb;
+    padding: 16px;
+    background: #ecfdf5;
+    color: #065f46;
+    border-radius: 10px;
     display: none;
   }
-  .result.show { display: block; }
-  .row { margin: 8px 0; font-size: 14px; }
-  .row .label { color: #6b7280; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
-  .row .val {
-    font-family: ui-monospace, "SF Mono", Menlo, monospace;
-    background: #fff; padding: 8px 10px; border-radius: 6px;
-    border: 1px solid #e5e7eb; word-break: break-all;
-    margin-top: 4px;
-  }
+  .summary.show { display: block; }
   .download {
     display: inline-block;
-    margin-top: 14px;
+    margin-top: 12px;
     padding: 12px 18px;
     background: #10b981; color: #fff;
     border-radius: 8px;
@@ -93,6 +91,32 @@
     font-size: 14px;
   }
   .download:hover { background: #059669; }
+  .problems { margin-top: 22px; display: none; }
+  .problems.show { display: block; }
+  .problem {
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+  }
+  .problem h3 {
+    margin: 0 0 6px;
+    font-size: 14px;
+    color: #2563eb;
+  }
+  .problem .stmt {
+    font-size: 13px; color: #374151; margin-bottom: 8px; white-space: pre-wrap;
+  }
+  .problem .ans {
+    font-size: 14px; color: #065f46; font-weight: 600;
+    background: #ecfdf5; padding: 6px 10px; border-radius: 6px;
+    display: inline-block; margin-bottom: 6px;
+  }
+  .problem .num { color: #6b7280; font-size: 12px; margin-left: 6px; }
+  .problem .steps {
+    font-size: 12px; color: #6b7280; white-space: pre-wrap; margin-top: 4px;
+  }
   .error { color: #dc2626; margin-top: 14px; font-size: 14px; }
   .spinner {
     display: inline-block; width: 16px; height: 16px;
@@ -104,54 +128,46 @@
 </style>
 </head>
 <body>
-<div class="card">
-  <h1>Math Solver — 3 Agents</h1>
-  <p class="sub">Upload PDF chứa phép tính, hệ thống sẽ OCR → tính → trả PDF kết quả.</p>
+<div class="wrap"><div class="card">
+  <h1>Giải phiếu bài tập toán</h1>
+  <p class="sub">Tải PDF/ảnh phiếu bài tập (có thể nhiều câu) → hệ thống OCR, giải, và xuất PDF đáp án.</p>
 
   <div class="agents">
-    <div class="agent"><strong>Agent 1</strong>OCR → LaTeX</div>
-    <div class="agent"><strong>Agent 2</strong>Tính toán</div>
-    <div class="agent"><strong>Agent 3</strong>Render PDF</div>
+    <div class="agent"><strong>Agent 1</strong>OCR đề bài</div>
+    <div class="agent"><strong>Agent 2</strong>Giải toán</div>
+    <div class="agent"><strong>Agent 3</strong>Xuất PDF</div>
   </div>
 
   <label class="drop" id="drop">
-    <input type="file" id="file" accept="application/pdf" />
+    <input type="file" id="file" accept="application/pdf,image/png,image/jpeg,image/webp" />
     <div style="font-size:30px">📄</div>
-    <p><strong>Click chọn</strong> hoặc kéo thả PDF vào đây</p>
+    <p><strong>Click chọn</strong> hoặc kéo thả PDF/ảnh phiếu bài tập vào đây</p>
     <div class="filename" id="filename"></div>
   </label>
 
   <button id="submit" disabled>Xử lý</button>
 
-  <div class="result" id="result">
-    <div class="row">
-      <div class="label">Phép tính (LaTeX)</div>
-      <div class="val" id="r-expr"></div>
-    </div>
-    <div class="row">
-      <div class="label">Kết quả</div>
-      <div class="val" id="r-result"></div>
-    </div>
-    <div class="row" id="r-numeric-row" style="display:none">
-      <div class="label">Giá trị số</div>
-      <div class="val" id="r-numeric"></div>
-    </div>
-    <div class="row" id="r-steps-row" style="display:none">
-      <div class="label">Các bước</div>
-      <div class="val" id="r-steps" style="white-space:pre-wrap"></div>
-    </div>
-    <a class="download" id="download" href="#" download>⬇ Tải PDF kết quả</a>
+  <div class="stage" id="stage"></div>
+
+  <div class="summary" id="summary">
+    <div id="summary-text"></div>
+    <a class="download" id="download" href="#" download>⬇ Tải PDF đáp án</a>
   </div>
 
+  <div class="problems" id="problems"></div>
+
   <div class="error" id="error"></div>
-</div>
+</div></div>
 
 <script>
 const drop = document.getElementById('drop');
 const fileInput = document.getElementById('file');
 const filename = document.getElementById('filename');
 const submit = document.getElementById('submit');
-const result = document.getElementById('result');
+const stage = document.getElementById('stage');
+const summary = document.getElementById('summary');
+const summaryText = document.getElementById('summary-text');
+const problemsEl = document.getElementById('problems');
 const errorEl = document.getElementById('error');
 
 let selected = null;
@@ -160,7 +176,8 @@ function setFile(f) {
   selected = f;
   filename.textContent = f ? f.name : '';
   submit.disabled = !f;
-  result.classList.remove('show');
+  summary.classList.remove('show');
+  problemsEl.classList.remove('show');
   errorEl.textContent = '';
 }
 
@@ -173,16 +190,23 @@ fileInput.addEventListener('change', e => {
   drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('drag'); }));
 drop.addEventListener('drop', e => {
   const f = e.dataTransfer.files[0];
-  if (f && f.type === 'application/pdf') setFile(f);
-  else errorEl.textContent = 'Chỉ chấp nhận file PDF';
+  const ok = ['application/pdf','image/png','image/jpeg','image/webp'].includes(f?.type);
+  if (ok) setFile(f);
+  else errorEl.textContent = 'Chỉ chấp nhận PDF hoặc ảnh (PNG/JPG/WEBP)';
 });
+
+function escape(s) { return (s || '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])); }
 
 submit.addEventListener('click', async () => {
   if (!selected) return;
   errorEl.textContent = '';
-  result.classList.remove('show');
+  summary.classList.remove('show');
+  problemsEl.classList.remove('show');
+  problemsEl.innerHTML = '';
   submit.disabled = true;
-  submit.innerHTML = '<span class="spinner"></span>Đang xử lý...';
+  submit.innerHTML = '<span class="spinner"></span>Đang xử lý (có thể mất 30-90 giây)...';
+  stage.classList.add('show');
+  stage.textContent = '⏳ Agent 1 đang đọc đề bài, Agent 2 đang giải, Agent 3 đang xuất PDF...';
 
   try {
     const fd = new FormData();
@@ -193,25 +217,31 @@ submit.addEventListener('click', async () => {
       throw new Error(err.detail || `HTTP ${res.status}`);
     }
     const data = await res.json();
-    document.getElementById('r-expr').textContent = data.expression;
-    document.getElementById('r-result').textContent = data.result_latex;
-    if (data.result_numeric) {
-      document.getElementById('r-numeric-row').style.display = '';
-      document.getElementById('r-numeric').textContent = data.result_numeric;
-    } else {
-      document.getElementById('r-numeric-row').style.display = 'none';
-    }
-    if (data.steps) {
-      document.getElementById('r-steps-row').style.display = '';
-      document.getElementById('r-steps').textContent = data.steps;
-    } else {
-      document.getElementById('r-steps-row').style.display = 'none';
-    }
+
+    summaryText.innerHTML = `✅ Đã giải <b>${data.count}</b> bài. PDF đáp án sẵn sàng:`;
     document.getElementById('download').href = data.download_url;
-    result.classList.add('show');
+    summary.classList.add('show');
+
+    const solByNum = {};
+    (data.solutions || []).forEach(s => { solByNum[String(s.number)] = s; });
+    problemsEl.innerHTML = (data.problems || []).map(p => {
+      const sol = solByNum[String(p.number)] || {};
+      const stmt = p.statement_text || (p.statement_math ? '$' + p.statement_math + '$' : '');
+      const ans = sol.answer_latex || '?';
+      const num = sol.answer_numeric ? `<span class="num">≈ ${escape(sol.answer_numeric)}</span>` : '';
+      const steps = sol.steps_text ? `<div class="steps">${escape(sol.steps_text)}</div>` : '';
+      return `<div class="problem">
+        <h3>Bài ${escape(p.number)}</h3>
+        <div class="stmt">${escape(stmt)}</div>
+        <div><span class="ans">${escape(ans)}</span>${num}</div>
+        ${steps}
+      </div>`;
+    }).join('');
+    problemsEl.classList.add('show');
   } catch (e) {
     errorEl.textContent = '⚠ ' + e.message;
   } finally {
+    stage.classList.remove('show');
     submit.disabled = false;
     submit.textContent = 'Xử lý';
   }
