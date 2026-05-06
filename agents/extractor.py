@@ -9,7 +9,7 @@ import anthropic
 
 _client = anthropic.Anthropic()
 _MODEL = "claude-opus-4-7"
-_THINKING_BUDGET = 6000
+_EFFORT = "medium"
 
 _IMAGE_TYPES = {
     ".png": "image/png",
@@ -75,7 +75,8 @@ def extract(file_path: str) -> dict:
     message = _client.messages.create(
         model=_MODEL,
         max_tokens=16000,
-        thinking={"type": "enabled", "budget_tokens": _THINKING_BUDGET},
+        thinking={"type": "adaptive"},
+        output_config={"effort": _EFFORT},
         messages=[
             {"role": "user", "content": [source_block, {"type": "text", "text": _PROMPT}]},
         ],

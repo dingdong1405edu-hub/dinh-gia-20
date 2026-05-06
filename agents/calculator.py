@@ -7,7 +7,7 @@ import anthropic
 
 _client = anthropic.Anthropic()
 _MODEL = "claude-opus-4-7"
-_THINKING_BUDGET = 12000
+_EFFORT = "high"
 
 
 def solve(problems: list[dict]) -> dict:
@@ -64,7 +64,8 @@ CRITICAL ACCURACY RULES:
     message = _client.messages.create(
         model=_MODEL,
         max_tokens=16000,
-        thinking={"type": "enabled", "budget_tokens": _THINKING_BUDGET},
+        thinking={"type": "adaptive"},
+        output_config={"effort": _EFFORT},
         messages=[{"role": "user", "content": user_prompt}],
     )
     elapsed = time.time() - t0
