@@ -3,18 +3,37 @@ import json
 import textwrap
 import time
 from datetime import datetime
+from pathlib import Path
 
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib import rcParams
+from matplotlib import font_manager, rcParams
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.patches import FancyBboxPatch, Rectangle
 
-rcParams["font.family"] = "DejaVu Sans"
+# Register vendored Be Vietnam Pro (full Vietnamese diacritic support).
+_FONT_DIR = Path(__file__).resolve().parent.parent / "fonts"
+_PRIMARY_FONT = "DejaVu Sans"
+if _FONT_DIR.is_dir():
+    for _ttf in sorted(_FONT_DIR.glob("*.ttf")):
+        try:
+            font_manager.fontManager.addfont(str(_ttf))
+        except Exception:
+            pass
+    _families = {f.name for f in font_manager.fontManager.ttflist}
+    if "Be Vietnam Pro" in _families:
+        _PRIMARY_FONT = "Be Vietnam Pro"
+
+rcParams["font.family"] = "sans-serif"
+rcParams["font.sans-serif"] = [_PRIMARY_FONT, "DejaVu Sans", "Arial"]
 rcParams["mathtext.fontset"] = "cm"
 rcParams["axes.unicode_minus"] = False
+# Embed TrueType (Type 42) so Vietnamese combining diacritics survive PDF.
+rcParams["pdf.fonttype"] = 42
+rcParams["ps.fonttype"] = 42
+rcParams["pdf.compression"] = 6
 
 A4 = (8.27, 11.69)
 
@@ -291,7 +310,7 @@ def _section_investment_thesis(thesis):
             ev = p.get("evidence", "")
             if ev:
                 y -= 0.005
-                y = _draw_block(ax, f"📊 {ev}", x=0.02, y=y,
+                y = _draw_block(ax, f"Bằng chứng: {ev}", x=0.02, y=y,
                                 max_chars=98, max_lines=3, fontsize=9,
                                 color="#6b7280", line_height=0.018)
             y -= 0.012
@@ -1358,9 +1377,19 @@ def _new_page(title: str):
     fig = plt.figure(figsize=A4)
     ax = fig.add_axes([0.07, 0.05, 0.86, 0.92])
     ax.axis("off"); ax.set_xlim(0, 1); ax.set_ylim(0, 1)
-    ax.text(0, 0.97, title, fontsize=16, fontweight="bold",
-            color="#1e3a8a", va="top")
-    ax.plot([0, 1], [0.952, 0.952], color="#1e3a8a", linewidth=1.5)
+    # subtle accent square + title
+    ax.add_patch(Rectangle((0, 0.965), 0.012, 0.025,
+                           facecolor="#1e3a8a", edgecolor="none",
+                           transform=ax.transAxes))
+    ax.text(0.022, 0.978, title, fontsize=15, fontweight="bold",
+            color="#1e3a8a", va="center")
+    ax.plot([0, 1], [0.955, 0.955], color="#1e3a8a", linewidth=1.2)
+    ax.plot([0, 0.18], [0.952, 0.952], color="#dc2626", linewidth=1.2)
+    # footer
+    ax.text(1, 0.005, "Báo cáo định giá doanh nghiệp",
+            fontsize=8, color="#9ca3af", ha="right", va="bottom",
+            style="italic", transform=ax.transAxes)
+    ax.plot([0, 1], [0.022, 0.022], color="#e5e7eb", linewidth=0.6)
     return fig, ax
 
 
