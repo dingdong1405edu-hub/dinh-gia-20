@@ -152,6 +152,7 @@ def extract(file_path: str) -> dict:
     message = _client.messages.create(
         model=_MODEL,
         max_tokens=16000,
+        temperature=0,  # determinism: cùng BCTC phải cho cùng số liệu trích xuất
         thinking={"type": "adaptive"},
         output_config={"effort": _EFFORT},
         messages=[

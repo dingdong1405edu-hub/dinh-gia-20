@@ -116,6 +116,7 @@ QUY TẮC:
     message = _client.messages.create(
         model=_MODEL,
         max_tokens=10000,
+        temperature=0,  # determinism: dự phóng 5Y phải ổn định giữa các lần chạy
         thinking={"type": "adaptive"},
         output_config={"effort": _EFFORT},
         messages=[{"role": "user", "content": user_prompt}],

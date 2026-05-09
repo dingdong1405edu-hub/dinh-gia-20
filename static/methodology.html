@@ -168,9 +168,17 @@
   <h1>Phương pháp tính & Cách audit số liệu</h1>
   <p class="sub">Tài liệu này giải thích MỌI phép tính trong báo cáo: công thức, dữ liệu đầu vào, file Python phụ trách. Khi bạn (hoặc kế toán) thấy 1 con số sai, mở đúng file đó sửa là ra.</p>
 
+  <div style="background:#fef3c7; border:1px solid #fbbf24; border-radius:10px; padding:14px 18px; margin-bottom:18px; font-size:13.5px; color:#78350f">
+    <b>📊 Excel có LIVE FORMULAS</b> — bấm vào bất kỳ ô nào trong sheet <i>Tỷ số</i> hoặc <i>Định giá</i>, thanh formula bar bên trên Excel sẽ hiện công thức Excel thật (vd <code>='BCĐKT'!B7/'BCĐKT'!B17</code>). Sửa ô input (vàng) → toàn bộ DCF/Multiples re-compute tự động như 1 financial model thật.
+  </div>
+
+  <div style="background:#dbeafe; border:1px solid #3b82f6; border-radius:10px; padding:14px 18px; margin-bottom:22px; font-size:13.5px; color:#1e40af">
+    <b>🎯 Determinism</b> — Tất cả 6 agent gọi LLM giờ đều set <code>temperature=0</code>, nên cùng 1 file BCTC sẽ cho output ổn định giữa các lần chạy. Vẫn có thể có chênh lệch nhỏ ở các số ước lượng (TAM/SAM, multiples ngành) do bản chất judgment của LLM, nhưng số liệu trích xuất từ BCTC + tỷ số + DCF math sẽ y hệt.
+  </div>
+
   <div class="legend">
     <div><span class="badge b-py">PYTHON</span> Tính toán quyết định bởi công thức (Python). Cùng input → cùng output, có thể audit từng phép tính.</div>
-    <div><span class="badge b-ai">AI</span> Phán đoán bởi LLM (Claude Opus 4.7). Dựa trên ngữ cảnh và tri thức ngành. Có thể khác nhau giữa các lần chạy.</div>
+    <div><span class="badge b-ai">AI</span> Phán đoán bởi LLM (Claude Opus 4.7, temperature=0). Dựa trên ngữ cảnh và tri thức ngành. Khá ổn định nhưng có thể chênh nhẹ.</div>
   </div>
 
   <div class="toc">
