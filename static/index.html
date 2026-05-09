@@ -116,22 +116,59 @@
   .fv-range { font-size: 13px; color: #374151; }
   .fv-disc { font-size: 13px; color: #6b7280; margin-top: 6px; }
   .summary-text { color: #374151; font-size: 14px; line-height: 1.6; margin-bottom: 14px; }
-  .downloads { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
-  .dl {
-    flex: 1; min-width: 180px;
-    padding: 12px 14px;
-    border-radius: 8px;
-    text-decoration: none;
-    font-weight: 600;
-    font-size: 13px;
-    text-align: center;
+  .file-list { margin-top: 16px; }
+  .file-group {
+    margin-bottom: 14px;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    overflow: hidden;
   }
-  .dl-main { background: #1e3a8a; color: #fff; }
-  .dl-main:hover { background: #1e40af; }
-  .dl-debug { background: #dc2626; color: #fff; }
-  .dl-debug:hover { background: #b91c1c; }
-  .dl-trace { background: #6366f1; color: #fff; }
-  .dl-trace:hover { background: #4f46e5; }
+  .file-group-head {
+    padding: 10px 14px;
+    background: #f9fafb;
+    font-size: 12px; font-weight: 700;
+    color: #1e3a8a;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .file-group-head .small-action {
+    font-size: 11px; font-weight: 600;
+    color: #6b7280; cursor: pointer;
+    padding: 3px 8px; border-radius: 4px;
+    user-select: none;
+  }
+  .file-group-head .small-action:hover { background: #eff6ff; color: #1e3a8a; }
+  .file-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 14px;
+    border-top: 1px solid #f3f4f6;
+    font-size: 13px;
+  }
+  .file-row:first-of-type { border-top: 0; }
+  .file-row label { display: flex; align-items: center; gap: 8px; cursor: pointer; flex: 1; min-width: 0; }
+  .file-row .name { color: #1f2937; font-weight: 500; flex: 1; min-width: 0;
+                    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file-row .meta { color: #9ca3af; font-size: 11px; flex-shrink: 0; min-width: 80px; text-align: right; }
+  .file-row .badge {
+    display: inline-block; padding: 1px 6px; border-radius: 3px;
+    font-size: 10px; font-weight: 700; flex-shrink: 0;
+  }
+  .badge-pdf { background: #fee2e2; color: #991b1b; }
+  .badge-xlsx { background: #d1fae5; color: #065f46; }
+  .badge-json { background: #e0e7ff; color: #3730a3; }
+  .file-row .dl-btn {
+    flex-shrink: 0;
+    padding: 5px 10px;
+    border-radius: 5px;
+    background: #1e3a8a; color: #fff;
+    text-decoration: none;
+    font-weight: 600; font-size: 11px;
+  }
+  .file-row .dl-btn:hover { background: #1e40af; }
+  .file-row.featured { background: linear-gradient(180deg, #eff6ff 0%, #faf5ff 100%); }
+  .file-row.featured .name { color: #1e3a8a; font-weight: 700; font-size: 14px; }
 
   .meta-grid {
     display: grid; grid-template-columns: repeat(4, 1fr);
@@ -210,17 +247,17 @@
 <body>
 <div class="wrap"><div class="card">
   <h1>Định giá Doanh nghiệp SME</h1>
-  <p class="sub">Upload BCTC → 7 agent (Opus 4.7) phân tích đầy đủ 12 mục theo chuẩn báo cáo định giá: Executive Summary · Investment Thesis · Tổng quan DN · Ngành · HĐKD · Tài chính · Tỷ số · Dự phóng 5Y · DCF + Multiples · Sensitivity · Khuyến nghị · Phụ lục.</p>
+  <p class="sub">Upload BCTC → 7 agent (Opus 4.7) phân tích đầy đủ 12 mục — output gồm 13 PDF rời + 1 PDF đầy đủ + 1 file Excel 10 sheet. <a href="/agents" style="color:#1e3a8a; font-weight:600">Xem chi tiết pipeline →</a></p>
 
   <div class="agents-grid">
-    <div class="agent"><strong>Agent 1</strong>OCR + trích BCTC</div>
-    <div class="agent"><strong>Agent 2</strong>Phân tích ngành</div>
-    <div class="agent"><strong>Agent 3</strong>Tổng quan DN</div>
-    <div class="agent"><strong>Agent 4</strong>Tỷ số tài chính</div>
-    <div class="agent"><strong>Agent 5</strong>Dự phóng 5Y</div>
-    <div class="agent"><strong>Agent 6</strong>Định giá DCF/Mult</div>
-    <div class="agent"><strong>Agent 7</strong>Investment Thesis</div>
-    <div class="agent"><strong>Agent 8</strong>Render PDF 12 mục</div>
+    <a class="agent" href="/agents" style="text-decoration:none; color:inherit"><strong>Agent 1</strong>OCR + trích BCTC</a>
+    <a class="agent" href="/agents" style="text-decoration:none; color:inherit"><strong>Agent 2</strong>Phân tích ngành</a>
+    <a class="agent" href="/agents" style="text-decoration:none; color:inherit"><strong>Agent 3</strong>Tổng quan DN</a>
+    <a class="agent" href="/agents" style="text-decoration:none; color:inherit"><strong>Agent 4</strong>Tỷ số tài chính</a>
+    <a class="agent" href="/agents" style="text-decoration:none; color:inherit"><strong>Agent 5</strong>Dự phóng 5Y</a>
+    <a class="agent" href="/agents" style="text-decoration:none; color:inherit"><strong>Agent 6</strong>Định giá DCF/Mult</a>
+    <a class="agent" href="/agents" style="text-decoration:none; color:inherit"><strong>Agent 7</strong>Investment Thesis</a>
+    <a class="agent" href="/agents" style="text-decoration:none; color:inherit"><strong>Agent 8</strong>Render PDF + Excel</a>
   </div>
 
   <label class="drop" id="drop">
@@ -254,11 +291,7 @@
 
     <div class="summary-text" id="summary-text"></div>
 
-    <div class="downloads">
-      <a class="dl dl-main" id="dl-valuation" href="#" download>📑 Báo cáo Định giá (PDF)</a>
-      <a class="dl dl-debug" id="dl-debug" href="#" download>🔬 Debug PDF</a>
-      <a class="dl dl-trace" id="dl-trace" href="#" download>📦 Trace JSON</a>
-    </div>
+    <div class="file-list" id="file-list"></div>
 
     <div class="meta-grid" id="meta-grid"></div>
 
@@ -315,6 +348,63 @@ drop.addEventListener('drop', e => {
 });
 
 function escape(s) { return (s == null ? '' : String(s)).replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])); }
+
+function fmtSize(b) {
+  if (b == null) return '';
+  if (b < 1024) return b + ' B';
+  if (b < 1024 * 1024) return (b / 1024).toFixed(0) + ' KB';
+  return (b / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+function renderFiles(files) {
+  const container = document.getElementById('file-list');
+  if (!files.length) { container.innerHTML = ''; return; }
+  const groups = {
+    pdf_full:    { title: '📑 PDF — Báo cáo đầy đủ', items: [] },
+    pdf_section: { title: '📂 PDF — Mục lẻ (chọn từng phần để tải)', items: [] },
+    excel:       { title: '📊 Excel — Dữ liệu thô', items: [] },
+    debug:       { title: '🔬 Debug', items: [] },
+  };
+  files.forEach(f => (groups[f.category] || groups.debug).items.push(f));
+
+  function badge(fmt) {
+    const cls = fmt === 'PDF' ? 'badge-pdf' : fmt === 'XLSX' ? 'badge-xlsx' : 'badge-json';
+    return `<span class="badge ${cls}">${fmt}</span>`;
+  }
+
+  container.innerHTML = Object.entries(groups)
+    .filter(([_, g]) => g.items.length)
+    .map(([key, g]) => {
+      const isMulti = g.items.length > 1;
+      const groupId = 'grp-' + key;
+      const head = `<div class="file-group-head">
+          <span>${escape(g.title)} · ${g.items.length} file</span>
+          ${isMulti ? `<span class="small-action" onclick="downloadGroup('${groupId}')">⬇ Tải tất cả nhóm này</span>` : ''}
+        </div>`;
+      const rows = g.items.map((f, i) => `
+        <div class="file-row ${key === 'pdf_full' ? 'featured' : ''}" data-group="${groupId}" data-url="${escape(f.url)}">
+          <span class="name">${escape(f.title)}</span>
+          ${badge(f.format)}
+          <span class="meta">${f.pages ? f.pages + ' trang · ' : ''}${fmtSize(f.size_bytes)}</span>
+          <a class="dl-btn" href="${escape(f.url)}" download>Tải</a>
+        </div>
+      `).join('');
+      return `<div class="file-group">${head}${rows}</div>`;
+    }).join('');
+}
+
+function downloadGroup(groupId) {
+  // Trigger downloads sequentially. Browsers limit, so add a tiny delay.
+  const rows = document.querySelectorAll(`.file-row[data-group="${groupId}"]`);
+  rows.forEach((row, i) => {
+    setTimeout(() => {
+      const a = document.createElement('a');
+      a.href = row.dataset.url;
+      a.download = '';
+      document.body.appendChild(a); a.click(); a.remove();
+    }, i * 250);
+  });
+}
 
 function fmtMoney(v) {
   if (v == null) return '—';
@@ -396,9 +486,7 @@ submit.addEventListener('click', async () => {
     if (es.key_drivers?.length) summaryParts.push('Driver chính: ' + es.key_drivers.join(' · '));
     document.getElementById('summary-text').textContent = summaryParts.join('\n\n');
 
-    document.getElementById('dl-valuation').href = data.valuation_url;
-    document.getElementById('dl-debug').href = data.debug_url;
-    document.getElementById('dl-trace').href = data.trace_url;
+    renderFiles(data.files || []);
 
     const m = data.meta || {};
     document.getElementById('meta-grid').innerHTML = [

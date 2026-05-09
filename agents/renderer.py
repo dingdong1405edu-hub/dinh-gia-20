@@ -1,4 +1,8 @@
-"""Agent 8: Render 12-section SME Valuation Report PDF + debug report."""
+"""Agent 8: Render báo cáo định giá thành PDF + Excel.
+
+Style tokens (màu, font, size, layout) tách sang agents/report_style.py.
+Sửa file đó để đổi look toàn bộ báo cáo.
+"""
 import json
 import textwrap
 import time
@@ -13,9 +17,20 @@ from matplotlib import font_manager, rcParams
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.patches import FancyBboxPatch, Rectangle
 
-# Register vendored Be Vietnam Pro (full Vietnamese diacritic support).
+from agents.report_style import (
+    COLORS as C,
+    SIZES as S,
+    LAYOUT as L,
+    PRIMARY_FONT,
+    FONT_FALLBACKS,
+    WEIGHT_HEADER,
+    grade_color as _grade_color_fn,
+    rating_color as _rating_color_fn,
+)
+
+# Register vendored Vietnamese-supporting fonts (full diacritic coverage).
 _FONT_DIR = Path(__file__).resolve().parent.parent / "fonts"
-_PRIMARY_FONT = "DejaVu Sans"
+_PRIMARY_FONT_RESOLVED = "DejaVu Sans"
 if _FONT_DIR.is_dir():
     for _ttf in sorted(_FONT_DIR.glob("*.ttf")):
         try:
@@ -23,11 +38,11 @@ if _FONT_DIR.is_dir():
         except Exception:
             pass
     _families = {f.name for f in font_manager.fontManager.ttflist}
-    if "Be Vietnam Pro" in _families:
-        _PRIMARY_FONT = "Be Vietnam Pro"
+    if PRIMARY_FONT in _families:
+        _PRIMARY_FONT_RESOLVED = PRIMARY_FONT
 
 rcParams["font.family"] = "sans-serif"
-rcParams["font.sans-serif"] = [_PRIMARY_FONT, "DejaVu Sans", "Arial"]
+rcParams["font.sans-serif"] = [_PRIMARY_FONT_RESOLVED, *FONT_FALLBACKS]
 rcParams["mathtext.fontset"] = "cm"
 rcParams["axes.unicode_minus"] = False
 # Embed TrueType (Type 42) so Vietnamese combining diacritics survive PDF.
@@ -35,11 +50,10 @@ rcParams["pdf.fonttype"] = 42
 rcParams["ps.fonttype"] = 42
 rcParams["pdf.compression"] = 6
 
-A4 = (8.27, 11.69)
+A4 = L["page_size"]
 
-GRADE_COLOR = {"A": "#10b981", "B": "#22c55e", "C": "#f59e0b",
-               "D": "#f97316", "F": "#ef4444"}
-RATING_COLOR = {"good": "#10b981", "warning": "#f59e0b", "poor": "#ef4444", "n/a": "#9ca3af"}
+GRADE_COLOR = {g: _grade_color_fn(g) for g in "ABCDF"}
+RATING_COLOR = {k: _rating_color_fn(k) for k in ("good", "warning", "poor", "n/a")}
 RATING_LABEL_VI = {"good": "Tốt", "warning": "TB", "poor": "Kém", "n/a": "—"}
 
 RATIO_LABEL_VI = {
@@ -73,35 +87,65 @@ PERCENT_RATIOS = {"gross_margin", "operating_margin", "ebitda_margin", "net_marg
 
 # ============================ Public API ============================
 
-def render_valuation_report(payload: dict, output_path: str) -> dict:
-    """
-    payload = {
-      "extracted": {financials, raw_response, thinking, ...},
-      "industry": {industry: {...}, ...},
-      "business": {business: {...}, ...},
-      "ratios": {ratios, growth},
-      "projection": {projection: {...}, ...},
-      "valuation": {assumptions, dcf, multiples, sensitivity, summary, ...},
-      "thesis": {thesis: {...}, ...},
+def _bundle(payload: dict) -> dict:
+    """Unwrap pipeline payload into the flat dict each section function expects."""
+    return {
+        "financials": (payload.get("extracted") or {}).get("financials") or {},
+        "industry": (payload.get("industry") or {}).get("industry") or {},
+        "business": (payload.get("business") or {}).get("business") or {},
+        "ratios": payload.get("ratios") or {},
+        "projection": (payload.get("projection") or {}).get("projection") or {},
+        "valuation": payload.get("valuation") or {},
+        "thesis": (payload.get("thesis") or {}).get("thesis") or {},
     }
-    """
-    t0 = time.time()
-    financials = (payload.get("extracted") or {}).get("financials") or {}
-    industry = (payload.get("industry") or {}).get("industry") or {}
-    business = (payload.get("business") or {}).get("business") or {}
-    ratios = payload.get("ratios") or {}
-    projection = (payload.get("projection") or {}).get("projection") or {}
-    valuation = payload.get("valuation") or {}
-    thesis = (payload.get("thesis") or {}).get("thesis") or {}
 
+
+# Section registry: (kind, slug, title, builder).
+# `builder(bundle)` yields matplotlib Figure objects for that section.
+# `kind`  — stable id, dùng cho download URL.
+# `slug`  — file name (numeric prefix giữ thứ tự khi liệt kê).
+# `title` — tên hiển thị cho user.
+SECTIONS = [
+    ("cover", "00_cover", "Trang bìa",
+     lambda b: [_page_cover(b["financials"], b["valuation"], b["thesis"])]),
+    ("executive", "01_executive_summary", "1. Executive Summary",
+     lambda b: list(_section_executive_summary(b["financials"], b["valuation"], b["thesis"]))),
+    ("thesis", "02_investment_thesis", "2. Investment Thesis",
+     lambda b: list(_section_investment_thesis(b["thesis"]))),
+    ("company", "03_company_overview", "3. Tổng quan Doanh nghiệp",
+     lambda b: list(_section_company_overview(b["financials"], b["business"]))),
+    ("industry", "04_industry", "4. Phân tích Ngành",
+     lambda b: list(_section_industry(b["industry"]))),
+    ("operations", "05_operations", "5. Hoạt động kinh doanh",
+     lambda b: list(_section_operations(b["thesis"], b["business"], b["ratios"]))),
+    ("financials", "06_financial_statements", "6. Báo cáo tài chính",
+     lambda b: list(_section_financial_statements(b["financials"]))),
+    ("ratios", "07_ratios", "7. Tỷ số tài chính",
+     lambda b: list(_section_ratios(b["ratios"]))),
+    ("projections", "08_projections", "8. Dự phóng 5 năm",
+     lambda b: list(_section_projections(b["projection"]))),
+    ("valuation", "09_valuation", "9. Định giá",
+     lambda b: list(_section_valuation(b["valuation"], b["financials"]))),
+    ("sensitivity", "10_sensitivity", "10. Sensitivity",
+     lambda b: list(_section_sensitivity(b["valuation"]))),
+    ("conclusion", "11_conclusion", "11. Kết luận",
+     lambda b: list(_section_conclusion(b["thesis"], b["valuation"]))),
+    ("appendix", "12_appendix", "12. Phụ lục",
+     lambda b: list(_section_appendix(b["valuation"], b["projection"], b["industry"]))),
+]
+
+
+def render_valuation_report(payload: dict, output_path: str) -> dict:
+    """Render báo cáo đầy đủ thành 1 file PDF."""
+    t0 = time.time()
+    bundle = _bundle(payload)
     pages = 0
     with PdfPages(output_path) as pdf:
-        for fig in _build_pages(financials, industry, business, ratios,
-                                projection, valuation, thesis):
-            pdf.savefig(fig)
-            plt.close(fig)
-            pages += 1
-
+        for _kind, _slug, _title, builder in SECTIONS:
+            for fig in builder(bundle):
+                pdf.savefig(fig)
+                plt.close(fig)
+                pages += 1
     return {
         "elapsed_sec": round(time.time() - t0, 2),
         "pages": pages,
@@ -109,8 +153,53 @@ def render_valuation_report(payload: dict, output_path: str) -> dict:
     }
 
 
+def render_all(payload: dict, output_dir: str, full_pdf_path: str) -> dict:
+    """
+    Render đồng thời:
+      - Full PDF (tất cả mục) tại full_pdf_path.
+      - Mỗi mục thành 1 PDF riêng tại output_dir/<slug>.pdf.
+
+    Mỗi figure chỉ build 1 lần rồi ghi vào cả 2 PdfPages → tiết kiệm.
+    """
+    t0 = time.time()
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    bundle = _bundle(payload)
+
+    section_files = []
+    total_pages = 0
+    with PdfPages(full_pdf_path) as full_pdf:
+        for kind, slug, title, builder in SECTIONS:
+            figs = list(builder(bundle))
+            if not figs:
+                continue
+            section_path = out / f"{slug}.pdf"
+            with PdfPages(str(section_path)) as sec_pdf:
+                for fig in figs:
+                    sec_pdf.savefig(fig)
+                    full_pdf.savefig(fig)
+                    plt.close(fig)
+                    total_pages += 1
+            section_files.append({
+                "kind": kind,
+                "slug": slug,
+                "title": title,
+                "file_name": section_path.name,
+                "pages": len(figs),
+                "size_bytes": section_path.stat().st_size,
+            })
+
+    return {
+        "elapsed_sec": round(time.time() - t0, 2),
+        "total_pages": total_pages,
+        "section_files": section_files,
+        "full_pdf_path": full_pdf_path,
+        "full_pdf_size_bytes": Path(full_pdf_path).stat().st_size,
+    }
+
+
 def render_report(trace: dict, output_path: str) -> dict:
-    """Debug trace report — input/output of every agent."""
+    """Debug trace report — input/output của mọi agent."""
     t0 = time.time()
     sections = _trace_sections(trace)
     pages = 0
@@ -122,24 +211,6 @@ def render_report(trace: dict, output_path: str) -> dict:
     return {"elapsed_sec": round(time.time() - t0, 2), "pages": pages, "output_path": output_path}
 
 
-# ============================ Page builder ============================
-
-def _build_pages(financials, industry, business, ratios, projection, valuation, thesis):
-    yield _page_cover(financials, valuation, thesis)
-    yield from _section_executive_summary(financials, valuation, thesis)
-    yield from _section_investment_thesis(thesis)
-    yield from _section_company_overview(financials, business)
-    yield from _section_industry(industry)
-    yield from _section_operations(thesis, business, ratios)
-    yield from _section_financial_statements(financials)
-    yield from _section_ratios(ratios)
-    yield from _section_projections(projection)
-    yield from _section_valuation(valuation, financials)
-    yield from _section_sensitivity(valuation)
-    yield from _section_conclusion(thesis, valuation)
-    yield from _section_appendix(valuation, projection, industry)
-
-
 # ============================ Cover ============================
 
 def _page_cover(financials, valuation, thesis):
@@ -147,23 +218,23 @@ def _page_cover(financials, valuation, thesis):
     ax = fig.add_axes([0, 0, 1, 1])
     ax.axis("off"); ax.set_xlim(0, 1); ax.set_ylim(0, 1)
 
-    ax.add_patch(Rectangle((0, 0.96), 1, 0.04, color="#1e3a8a", transform=ax.transAxes))
-    ax.add_patch(Rectangle((0, 0), 1, 0.03, color="#1e3a8a", transform=ax.transAxes))
+    ax.add_patch(Rectangle((0, 0.96), 1, 0.04, color=C["primary"], transform=ax.transAxes))
+    ax.add_patch(Rectangle((0, 0), 1, 0.03, color=C["primary"], transform=ax.transAxes))
 
     ax.text(0.5, 0.88, "BÁO CÁO ĐỊNH GIÁ DOANH NGHIỆP",
-            ha="center", va="top", fontsize=22, fontweight="bold", color="#1e3a8a")
+            ha="center", va="top", fontsize=22, fontweight="bold", color=C["primary"])
     ax.text(0.5, 0.83, "SME Valuation Report",
-            ha="center", va="top", fontsize=13, color="#6b7280", style="italic")
-    ax.plot([0.18, 0.82], [0.81, 0.81], color="#1e3a8a", linewidth=2.5)
+            ha="center", va="top", fontsize=13, color=C["text_muted"], style="italic")
+    ax.plot([0.18, 0.82], [0.81, 0.81], color=C["primary"], linewidth=2.5)
 
     company = (_get(financials, "company", "name") or "(Không xác định)").strip()
     ax.text(0.5, 0.74, company, ha="center", va="top",
-            fontsize=20, fontweight="bold", color="#1e3a8a")
+            fontsize=20, fontweight="bold", color=C["primary"])
 
     period = _get(financials, "period", "current", "label") or ""
     if period:
         ax.text(0.5, 0.685, f"Kỳ phân tích: {period}", ha="center", va="top",
-                fontsize=13, color="#374151")
+                fontsize=13, color=C["text"])
 
     industry_name = ""
     rt = _get(financials, "company", "report_type")
@@ -171,7 +242,7 @@ def _page_cover(financials, valuation, thesis):
         industry_name = rt
     if industry_name:
         ax.text(0.5, 0.65, industry_name, ha="center", va="top",
-                fontsize=11, color="#6b7280", style="italic")
+                fontsize=11, color=C["text_muted"], style="italic")
 
     summary = (valuation.get("summary") or {})
     fv_mid = summary.get("fair_value_mid")
@@ -182,36 +253,36 @@ def _page_cover(financials, valuation, thesis):
     box_y = 0.42
     ax.add_patch(FancyBboxPatch((0.10, box_y - 0.02), 0.80, 0.18,
                                  boxstyle="round,pad=0.005,rounding_size=0.012",
-                                 linewidth=1.5, edgecolor="#1e3a8a",
-                                 facecolor="#eff6ff", transform=ax.transAxes))
+                                 linewidth=1.5, edgecolor=C["primary"],
+                                 facecolor=C["primary_light"], transform=ax.transAxes))
     ax.text(0.5, box_y + 0.13, "Giá trị hợp lý ước tính (Equity Value)",
-            ha="center", va="center", fontsize=12, fontweight="bold", color="#1e3a8a")
+            ha="center", va="center", fontsize=12, fontweight="bold", color=C["primary"])
     if fv_mid is not None:
         ax.text(0.5, box_y + 0.08, _fmt_money(fv_mid),
-                ha="center", va="center", fontsize=24, fontweight="bold", color="#1e3a8a")
+                ha="center", va="center", fontsize=24, fontweight="bold", color=C["primary"])
         ax.text(0.5, box_y + 0.04, f"({unit})",
-                ha="center", va="center", fontsize=10, color="#6b7280")
+                ha="center", va="center", fontsize=10, color=C["text_muted"])
         if fv_low is not None and fv_high is not None:
             ax.text(0.5, box_y, f"Khoảng: {_fmt_money(fv_low)} — {_fmt_money(fv_high)}",
-                    ha="center", va="center", fontsize=11, color="#374151")
+                    ha="center", va="center", fontsize=11, color=C["text"])
     else:
         ax.text(0.5, box_y + 0.06, "(Không đủ dữ liệu định giá)",
-                ha="center", va="center", fontsize=14, color="#9ca3af", style="italic")
+                ha="center", va="center", fontsize=14, color=C["text_dim"], style="italic")
 
     headline = _get(thesis, "executive_summary", "headline") or ""
     if headline:
         _draw_block(ax, headline, x=0.10, y=0.34, max_chars=72,
-                    max_lines=4, fontsize=11, color="#374151", line_height=0.022)
+                    max_lines=4, fontsize=11, color=C["text"], line_height=0.022)
 
     rec = _get(thesis, "executive_summary", "recommendation") or ""
     if rec:
         ax.text(0.10, 0.18, "KHUYẾN NGHỊ", fontsize=10,
-                fontweight="bold", color="#1e3a8a", va="top")
+                fontweight="bold", color=C["primary"], va="top")
         _draw_block(ax, rec, x=0.10, y=0.16, max_chars=80, max_lines=4,
-                    fontsize=11, color="#1f2937", line_height=0.022)
+                    fontsize=11, color=C["text_strong"], line_height=0.022)
 
     ax.text(0.5, 0.07, datetime.now().strftime("%d/%m/%Y · Generated by 3-agent pipeline"),
-            ha="center", va="bottom", fontsize=9, color="#9ca3af", style="italic")
+            ha="center", va="bottom", fontsize=9, color=C["text_dim"], style="italic")
     return fig
 
 
@@ -229,7 +300,7 @@ def _section_executive_summary(financials, valuation, thesis):
     y = 0.92
     if es.get("headline"):
         ax.text(0, y, es["headline"], fontsize=12, fontweight="bold",
-                color="#1e3a8a", va="top", wrap=True)
+                color=C["primary"], va="top", wrap=True)
         y -= 0.05
 
     y = _draw_kv_grid(ax, [
@@ -248,7 +319,7 @@ def _section_executive_summary(financials, valuation, thesis):
 
     if val_summary.get("method_values"):
         ax.text(0, y, "Kết quả định giá theo phương pháp", fontsize=12,
-                fontweight="bold", color="#1e3a8a", va="top")
+                fontweight="bold", color=C["primary"], va="top")
         y -= 0.030
         rows = []
         for mv in val_summary["method_values"]:
@@ -265,22 +336,22 @@ def _section_executive_summary(financials, valuation, thesis):
 
     if es.get("recommendation"):
         ax.text(0, y, "Khuyến nghị", fontsize=12, fontweight="bold",
-                color="#1e3a8a", va="top")
+                color=C["primary"], va="top")
         y -= 0.028
         y = _draw_block(ax, es["recommendation"], x=0, y=y,
                         max_chars=92, max_lines=5, fontsize=11,
-                        color="#374151", line_height=0.022)
+                        color=C["text"], line_height=0.022)
         y -= 0.015
 
     if es.get("key_drivers"):
         ax.text(0, y, "Driver chính của giá trị", fontsize=12,
-                fontweight="bold", color="#1e3a8a", va="top")
+                fontweight="bold", color=C["primary"], va="top")
         y -= 0.028
         for d in (es["key_drivers"] or [])[:6]:
             if y < 0.04:
                 break
             y = _draw_bullet(ax, d, x=0, y=y, fontsize=10,
-                             color="#374151", max_chars=98, max_lines=3,
+                             color=C["text"], max_chars=98, max_lines=3,
                              line_height=0.020)
             y -= 0.005
     yield fig
@@ -296,7 +367,7 @@ def _section_investment_thesis(thesis):
     points = it.get("thesis_points") or []
     if points:
         ax.text(0, y, "Luận điểm chính", fontsize=12,
-                fontweight="bold", color="#1e3a8a", va="top")
+                fontweight="bold", color=C["primary"], va="top")
         y -= 0.030
         for i, p in enumerate(points[:5], 1):
             if y < 0.10:
@@ -306,13 +377,13 @@ def _section_investment_thesis(thesis):
             y -= 0.025
             y = _draw_block(ax, p.get("thesis", ""), x=0.02, y=y,
                             max_chars=96, max_lines=4, fontsize=10,
-                            color="#374151", line_height=0.020)
+                            color=C["text"], line_height=0.020)
             ev = p.get("evidence", "")
             if ev:
                 y -= 0.005
                 y = _draw_block(ax, f"Bằng chứng: {ev}", x=0.02, y=y,
                                 max_chars=98, max_lines=3, fontsize=9,
-                                color="#6b7280", line_height=0.018)
+                                color=C["text_muted"], line_height=0.018)
             y -= 0.012
     yield fig
 
@@ -323,7 +394,7 @@ def _section_investment_thesis(thesis):
         y = 0.93
         if cats:
             ax2.text(0, y, "Catalysts (Yếu tố thúc đẩy giá trị)", fontsize=12,
-                     fontweight="bold", color="#10b981", va="top")
+                     fontweight="bold", color=C["good"], va="top")
             y -= 0.030
             for c in cats[:6]:
                 if y < 0.55:
@@ -333,20 +404,20 @@ def _section_investment_thesis(thesis):
                 if horizon:
                     title += f" — horizon: {horizon}"
                 y = _draw_bullet(ax2, title, x=0, y=y, fontsize=10,
-                                 color="#374151", max_chars=98, max_lines=3,
+                                 color=C["text"], max_chars=98, max_lines=3,
                                  line_height=0.020)
                 y -= 0.005
             y -= 0.020
 
         if risks:
             ax2.text(0, y, "Rủi ro chính", fontsize=12,
-                     fontweight="bold", color="#ef4444", va="top")
+                     fontweight="bold", color=C["poor"], va="top")
             y -= 0.030
             for r in risks[:8]:
                 if y < 0.04:
                     break
                 sev = (r.get("severity") or "").upper()
-                sev_color = {"HIGH": "#ef4444", "MEDIUM": "#f59e0b", "LOW": "#10b981"}.get(sev, "#6b7280")
+                sev_color = {"HIGH": C["poor"], "MEDIUM": C["warning"], "LOW": C["good"]}.get(sev, C["text_muted"])
                 line = f"[{(r.get('type') or '?').upper()} · {sev}] {r.get('description', '')}"
                 y = _draw_bullet(ax2, line, x=0, y=y, fontsize=10,
                                  color=sev_color, max_chars=98, max_lines=3,
@@ -355,7 +426,7 @@ def _section_investment_thesis(thesis):
                     y -= 0.002
                     y = _draw_block(ax2, f"Mitigation: {r['mitigation']}", x=0.02, y=y,
                                     max_chars=98, max_lines=2, fontsize=9,
-                                    color="#6b7280", line_height=0.018)
+                                    color=C["text_muted"], line_height=0.018)
                 y -= 0.008
         yield fig2
 
@@ -368,7 +439,7 @@ def _section_company_overview(financials, business):
 
     y = 0.93
     ax.text(0, y, "3.1. Thông tin cơ bản", fontsize=12,
-            fontweight="bold", color="#1e3a8a", va="top")
+            fontweight="bold", color=C["primary"], va="top")
     y -= 0.030
     rows = [
         ("Tên DN", company.get("name") or "—"),
@@ -385,11 +456,11 @@ def _section_company_overview(financials, business):
 
     bm = business.get("business_model") or {}
     ax.text(0, y, "3.2. Mô hình kinh doanh", fontsize=12,
-            fontweight="bold", color="#1e3a8a", va="top")
+            fontweight="bold", color=C["primary"], va="top")
     y -= 0.030
     y = _draw_block(ax, bm.get("summary") or "", x=0, y=y,
                     max_chars=96, max_lines=4, fontsize=10,
-                    color="#374151", line_height=0.020)
+                    color=C["text"], line_height=0.020)
     y -= 0.010
     rows = [
         ("Revenue model", bm.get("revenue_model") or "—"),
@@ -402,7 +473,7 @@ def _section_company_overview(financials, business):
     ue = business.get("unit_economics") or {}
     if ue:
         ax.text(0, y, "Unit economics", fontsize=11,
-                fontweight="bold", color="#374151", va="top")
+                fontweight="bold", color=C["text"], va="top")
         y -= 0.025
         rows = [
             ("Biên LN gộp", _fmt_pct_or_dash(ue.get("gross_margin_pct"))),
@@ -413,7 +484,7 @@ def _section_company_overview(financials, business):
         if ue.get("comments"):
             y = _draw_block(ax, ue["comments"], x=0, y=y,
                             max_chars=96, max_lines=3, fontsize=10,
-                            color="#374151", line_height=0.020)
+                            color=C["text"], line_height=0.020)
     yield fig
 
     fig2, ax2 = _new_page("3. Tổng quan Doanh nghiệp — Chuỗi giá trị")
@@ -421,13 +492,13 @@ def _section_company_overview(financials, business):
     si = business.get("scale_indicators") or {}
     y = 0.93
     ax2.text(0, y, "3.3. Chuỗi giá trị (Value Chain)", fontsize=12,
-             fontweight="bold", color="#1e3a8a", va="top")
+             fontweight="bold", color=C["primary"], va="top")
     y -= 0.040
     chain = [
         ("INPUT", vc.get("input") or "—", "#3b82f6"),
-        ("PRODUCTION", vc.get("production") or "—", "#10b981"),
-        ("DISTRIBUTION", vc.get("distribution") or "—", "#f59e0b"),
-        ("CUSTOMER", vc.get("customer") or "—", "#ef4444"),
+        ("PRODUCTION", vc.get("production") or "—", C["good"]),
+        ("DISTRIBUTION", vc.get("distribution") or "—", C["warning"]),
+        ("CUSTOMER", vc.get("customer") or "—", C["poor"]),
     ]
     box_w = 0.22; box_h = 0.10; gap = 0.025
     start_x = (1 - 4 * box_w - 3 * gap) / 2
@@ -442,16 +513,16 @@ def _section_company_overview(financials, business):
                  fontsize=10, fontweight="bold", color=color)
         _draw_block(ax2, body, x=x + 0.005, y=box_y + box_h - 0.04,
                     max_chars=24, max_lines=4, fontsize=8.5,
-                    color="#374151", line_height=0.014)
+                    color=C["text"], line_height=0.014)
         if i < len(chain) - 1:
             arrow_x = x + box_w
             ax2.annotate("", xy=(arrow_x + gap - 0.005, box_y + box_h / 2),
                          xytext=(arrow_x + 0.005, box_y + box_h / 2),
-                         arrowprops=dict(arrowstyle="->", color="#9ca3af"))
+                         arrowprops=dict(arrowstyle="->", color=C["text_dim"]))
     y = box_y - 0.05
 
     ax2.text(0, y, "Quy mô & vị thế", fontsize=12,
-             fontweight="bold", color="#1e3a8a", va="top")
+             fontweight="bold", color=C["primary"], va="top")
     y -= 0.030
     rows = [
         ("Quy mô doanh thu", si.get("revenue_size_class") or "—"),
@@ -479,11 +550,11 @@ def _section_industry(industry):
     if overview:
         y = _draw_block(ax, overview, x=0, y=y, max_chars=96,
                         max_lines=5, fontsize=10,
-                        color="#374151", line_height=0.020)
+                        color=C["text"], line_height=0.020)
         y -= 0.020
 
     ax.text(0, y, "Quy mô thị trường (TAM / SAM / SOM)", fontsize=12,
-            fontweight="bold", color="#1e3a8a", va="top")
+            fontweight="bold", color=C["primary"], va="top")
     y -= 0.030
     ms = industry.get("market_size") or {}
     rows = [
@@ -497,20 +568,20 @@ def _section_industry(industry):
     if ms.get("assumptions"):
         y = _draw_block(ax, f"Giả định: {ms['assumptions']}", x=0, y=y,
                         max_chars=98, max_lines=3, fontsize=9,
-                        color="#6b7280", line_height=0.018)
+                        color=C["text_muted"], line_height=0.018)
         y -= 0.015
 
     drivers = industry.get("industry_growth_drivers") or []
     trends = industry.get("industry_trends") or []
     if drivers:
         ax.text(0, y, "Driver tăng trưởng", fontsize=11,
-                fontweight="bold", color="#10b981", va="top")
+                fontweight="bold", color=C["good"], va="top")
         y -= 0.025
         for d in drivers[:5]:
             if y < 0.04:
                 break
             y = _draw_bullet(ax, d, x=0, y=y, fontsize=10,
-                             color="#374151", max_chars=98, max_lines=2,
+                             color=C["text"], max_chars=98, max_lines=2,
                              line_height=0.020)
             y -= 0.003
         y -= 0.010
@@ -523,7 +594,7 @@ def _section_industry(industry):
             if y < 0.04:
                 break
             y = _draw_bullet(ax, t, x=0, y=y, fontsize=10,
-                             color="#374151", max_chars=98, max_lines=2,
+                             color=C["text"], max_chars=98, max_lines=2,
                              line_height=0.020)
             y -= 0.003
     yield fig
@@ -533,7 +604,7 @@ def _section_industry(industry):
     competitors = industry.get("key_competitors") or []
     if competitors:
         ax2.text(0, y, "Đối thủ cạnh tranh chính", fontsize=12,
-                 fontweight="bold", color="#1e3a8a", va="top")
+                 fontweight="bold", color=C["primary"], va="top")
         y -= 0.030
         rows = []
         for c in competitors[:8]:
@@ -541,43 +612,43 @@ def _section_industry(industry):
                          _fmt_billion(c.get("estimated_revenue_vnd_billion")),
                          _fmt_pct_or_dash(c.get("market_share_pct")),
                          c.get("note") or ""))
-        ax2.text(0, y, "Tên DN", fontsize=9, fontweight="bold", color="#6b7280", va="top")
-        ax2.text(0.30, y, "Doanh thu ước", fontsize=9, fontweight="bold", color="#6b7280", va="top")
-        ax2.text(0.50, y, "Thị phần", fontsize=9, fontweight="bold", color="#6b7280", va="top")
-        ax2.text(0.65, y, "Ghi chú", fontsize=9, fontweight="bold", color="#6b7280", va="top")
+        ax2.text(0, y, "Tên DN", fontsize=9, fontweight="bold", color=C["text_muted"], va="top")
+        ax2.text(0.30, y, "Doanh thu ước", fontsize=9, fontweight="bold", color=C["text_muted"], va="top")
+        ax2.text(0.50, y, "Thị phần", fontsize=9, fontweight="bold", color=C["text_muted"], va="top")
+        ax2.text(0.65, y, "Ghi chú", fontsize=9, fontweight="bold", color=C["text_muted"], va="top")
         y -= 0.020
         ax2.plot([0, 1], [y + 0.005, y + 0.005], color="#d1d5db", linewidth=0.6)
         for name, rev, share, note in rows:
             if y < 0.30:
                 break
-            ax2.text(0, y, name, fontsize=9.5, color="#374151", va="top")
-            ax2.text(0.30, y, rev, fontsize=9.5, color="#374151", va="top")
-            ax2.text(0.50, y, share, fontsize=9.5, color="#374151", va="top")
+            ax2.text(0, y, name, fontsize=9.5, color=C["text"], va="top")
+            ax2.text(0.30, y, rev, fontsize=9.5, color=C["text"], va="top")
+            ax2.text(0.50, y, share, fontsize=9.5, color=C["text"], va="top")
             _draw_block(ax2, note[:70], x=0.65, y=y,
                         max_chars=42, max_lines=2,
-                        fontsize=9, color="#6b7280", line_height=0.016)
+                        fontsize=9, color=C["text_muted"], line_height=0.016)
             y -= 0.030
         y -= 0.005
 
     landscape = industry.get("competitive_landscape")
     if landscape:
         ax2.text(0, y, "Bối cảnh cạnh tranh", fontsize=11,
-                 fontweight="bold", color="#1e3a8a", va="top")
+                 fontweight="bold", color=C["primary"], va="top")
         y -= 0.025
         y = _draw_block(ax2, landscape, x=0, y=y, max_chars=96,
-                        max_lines=4, fontsize=10, color="#374151", line_height=0.020)
+                        max_lines=4, fontsize=10, color=C["text"], line_height=0.020)
         y -= 0.020
 
     risks = industry.get("industry_risks") or []
     if risks and y > 0.12:
         ax2.text(0, y, "Rủi ro ngành", fontsize=11,
-                 fontweight="bold", color="#ef4444", va="top")
+                 fontweight="bold", color=C["poor"], va="top")
         y -= 0.025
         for r in risks[:5]:
             if y < 0.06:
                 break
             y = _draw_bullet(ax2, r, x=0, y=y, fontsize=10,
-                             color="#374151", max_chars=98, max_lines=2,
+                             color=C["text"], max_chars=98, max_lines=2,
                              line_height=0.020)
             y -= 0.003
         y -= 0.010
@@ -585,13 +656,13 @@ def _section_industry(industry):
     barriers = industry.get("barriers_to_entry") or []
     if barriers and y > 0.08:
         ax2.text(0, y, "Rào cản gia nhập", fontsize=11,
-                 fontweight="bold", color="#374151", va="top")
+                 fontweight="bold", color=C["text"], va="top")
         y -= 0.025
         for b in barriers[:4]:
             if y < 0.04:
                 break
             y = _draw_bullet(ax2, b, x=0, y=y, fontsize=10,
-                             color="#374151", max_chars=98, max_lines=2,
+                             color=C["text"], max_chars=98, max_lines=2,
                              line_height=0.020)
             y -= 0.003
     yield fig2
@@ -608,20 +679,20 @@ def _section_operations(thesis, business, ratios):
 
     if op.get("revenue_drivers"):
         ax.text(0, y, "Driver doanh thu", fontsize=12,
-                fontweight="bold", color="#1e3a8a", va="top")
+                fontweight="bold", color=C["primary"], va="top")
         y -= 0.028
         y = _draw_block(ax, op["revenue_drivers"], x=0, y=y,
                         max_chars=96, max_lines=5, fontsize=10,
-                        color="#374151", line_height=0.020)
+                        color=C["text"], line_height=0.020)
         y -= 0.012
 
     if op.get("margin_analysis"):
         ax.text(0, y, "Phân tích biên lợi nhuận", fontsize=12,
-                fontweight="bold", color="#1e3a8a", va="top")
+                fontweight="bold", color=C["primary"], va="top")
         y -= 0.028
         y = _draw_block(ax, op["margin_analysis"], x=0, y=y,
                         max_chars=96, max_lines=5, fontsize=10,
-                        color="#374151", line_height=0.020)
+                        color=C["text"], line_height=0.020)
         y -= 0.012
 
     profitability = cur.get("profitability") or {}
@@ -640,23 +711,23 @@ def _section_operations(thesis, business, ratios):
 
     if op.get("channel_breakdown"):
         ax.text(0, y, "Phân bổ theo kênh / khu vực", fontsize=12,
-                fontweight="bold", color="#1e3a8a", va="top")
+                fontweight="bold", color=C["primary"], va="top")
         y -= 0.028
         y = _draw_block(ax, op["channel_breakdown"], x=0, y=y,
                         max_chars=96, max_lines=5, fontsize=10,
-                        color="#374151", line_height=0.020)
+                        color=C["text"], line_height=0.020)
         y -= 0.012
 
     obs = op.get("key_metrics_observations") or []
     if obs:
         ax.text(0, y, "Quan sát quan trọng", fontsize=12,
-                fontweight="bold", color="#1e3a8a", va="top")
+                fontweight="bold", color=C["primary"], va="top")
         y -= 0.028
         for o in obs[:5]:
             if y < 0.04:
                 break
             y = _draw_bullet(ax, o, x=0, y=y, fontsize=10,
-                             color="#374151", max_chars=98, max_lines=3,
+                             color=C["text"], max_chars=98, max_lines=3,
                              line_height=0.020)
             y -= 0.005
     yield fig
@@ -678,7 +749,7 @@ def _page_balance_sheet(financials):
     prev_label = _get(financials, "period", "previous", "label")
     bs_cur = _get(financials, "balance_sheet", "current") or {}
     bs_prev = _get(financials, "balance_sheet", "previous") or {}
-    ax.text(0, 0.93, f"Đơn vị: {unit}", fontsize=10, color="#6b7280",
+    ax.text(0, 0.93, f"Đơn vị: {unit}", fontsize=10, color=C["text_muted"],
             va="top", style="italic")
     rows = []
     a_cur = bs_cur.get("assets") or {}; a_prev = bs_prev.get("assets") if isinstance(bs_prev, dict) else {}
@@ -731,7 +802,7 @@ def _page_income_statement(financials):
     prev_label = _get(financials, "period", "previous", "label")
     is_cur = _get(financials, "income_statement", "current") or {}
     is_prev = _get(financials, "income_statement", "previous") or {}
-    ax.text(0, 0.93, f"Đơn vị: {unit}", fontsize=10, color="#6b7280",
+    ax.text(0, 0.93, f"Đơn vị: {unit}", fontsize=10, color=C["text_muted"],
             va="top", style="italic")
     rows = [
         ("Doanh thu BH&CCDV", 0, is_cur.get("revenue"), is_prev.get("revenue")),
@@ -766,7 +837,7 @@ def _page_cash_flow(financials):
     prev_label = _get(financials, "period", "previous", "label")
     cf_cur = _get(financials, "cash_flow", "current") or {}
     cf_prev = _get(financials, "cash_flow", "previous") or {}
-    ax.text(0, 0.93, f"Đơn vị: {unit}", fontsize=10, color="#6b7280",
+    ax.text(0, 0.93, f"Đơn vị: {unit}", fontsize=10, color=C["text_muted"],
             va="top", style="italic")
     rows = [
         ("LCTT từ HĐKD", "grand", cf_cur.get("cf_operating"), cf_prev.get("cf_operating")),
@@ -792,7 +863,7 @@ def _section_ratios(ratios):
     y = 0.93
     if growth:
         ax.text(0, y, "Tăng trưởng (YoY)", fontsize=12,
-                fontweight="bold", color="#1e3a8a", va="top")
+                fontweight="bold", color=C["primary"], va="top")
         y -= 0.028
         rows = [
             ("Doanh thu thuần", _fmt_pct_signed(growth.get("revenue_yoy"))),
@@ -812,12 +883,12 @@ def _section_ratios(ratios):
         ax.text(0, y, CATEGORY_LABEL_VI.get(cat, cat).upper(), fontsize=11,
                 fontweight="bold", color="#2563eb", va="top")
         y -= 0.022
-        ax.text(0, y, "Chỉ tiêu", fontsize=8.5, fontweight="bold", color="#6b7280", va="top")
-        ax.text(0.50, y, "Kỳ này", fontsize=8.5, fontweight="bold", color="#6b7280", va="top", ha="right")
-        ax.text(0.65, y, "Kỳ trước", fontsize=8.5, fontweight="bold", color="#6b7280", va="top", ha="right")
-        ax.text(0.85, y, "Đánh giá", fontsize=8.5, fontweight="bold", color="#6b7280", va="top", ha="right")
+        ax.text(0, y, "Chỉ tiêu", fontsize=8.5, fontweight="bold", color=C["text_muted"], va="top")
+        ax.text(0.50, y, "Kỳ này", fontsize=8.5, fontweight="bold", color=C["text_muted"], va="top", ha="right")
+        ax.text(0.65, y, "Kỳ trước", fontsize=8.5, fontweight="bold", color=C["text_muted"], va="top", ha="right")
+        ax.text(0.85, y, "Đánh giá", fontsize=8.5, fontweight="bold", color=C["text_muted"], va="top", ha="right")
         y -= 0.014
-        ax.plot([0, 0.95], [y + 0.005, y + 0.005], color="#e5e7eb", linewidth=0.5)
+        ax.plot([0, 0.95], [y + 0.005, y + 0.005], color=C["border"], linewidth=0.5)
         for name, payload in cat_data.items():
             if y < 0.04:
                 break
@@ -825,15 +896,15 @@ def _section_ratios(ratios):
             rating = payload.get("rating", "n/a")
             prev_value = ((prev_ratios.get(cat) or {}).get(name) or {}).get("value")
             ax.text(0, y, RATIO_LABEL_VI.get(name, name), fontsize=9.5,
-                    color="#374151", va="top")
+                    color=C["text"], va="top")
             ax.text(0.50, y, _fmt_ratio(name, value), fontsize=9.5,
                     color="#111827", va="top", ha="right")
             ax.text(0.65, y, _fmt_ratio(name, prev_value), fontsize=9.5,
-                    color="#6b7280", va="top", ha="right")
+                    color=C["text_muted"], va="top", ha="right")
             box = FancyBboxPatch((0.70, y - 0.014), 0.16, 0.018,
                                  boxstyle="round,pad=0.001,rounding_size=0.004",
                                  linewidth=0,
-                                 facecolor=RATING_COLOR.get(rating, "#9ca3af"),
+                                 facecolor=RATING_COLOR.get(rating, C["text_dim"]),
                                  alpha=0.85, transform=ax.transAxes)
             ax.add_patch(box)
             ax.text(0.78, y - 0.005, RATING_LABEL_VI.get(rating, rating),
@@ -855,7 +926,7 @@ def _section_projections(projection):
 
     y = 0.93
     ax.text(0, y, "Giả định chính", fontsize=12,
-            fontweight="bold", color="#1e3a8a", va="top")
+            fontweight="bold", color=C["primary"], va="top")
     y -= 0.026
     rows = [
         ("Tăng trưởng DT (Y1-Y5)",
@@ -876,12 +947,12 @@ def _section_projections(projection):
     if assumptions.get("growth_rationale"):
         y = _draw_block(ax, f"Lý giải tăng trưởng: {assumptions['growth_rationale']}",
                         x=0, y=y, max_chars=98, max_lines=3, fontsize=9,
-                        color="#6b7280", line_height=0.018)
+                        color=C["text_muted"], line_height=0.018)
         y -= 0.012
 
     if projections:
         ax.text(0, y, "Dự phóng KQKD & FCFF", fontsize=12,
-                fontweight="bold", color="#1e3a8a", va="top")
+                fontweight="bold", color=C["primary"], va="top")
         y -= 0.024
         headers = ["Khoản mục"] + [p.get("year_label", f"Y{i+1}") for i, p in enumerate(projections)]
         cols = len(headers)
@@ -892,7 +963,7 @@ def _section_projections(projection):
             x = 0 if i == 0 else col_w_label + (i - 1) * col_w_year
             ha = "left" if i == 0 else "right"
             ax.text(x + (0 if i == 0 else col_w_year), y, h,
-                    fontsize=9, fontweight="bold", color="#6b7280",
+                    fontsize=9, fontweight="bold", color=C["text_muted"],
                     va="top", ha=ha)
         y -= 0.018
         ax.plot([0, 0.95], [y + 0.005, y + 0.005], color="#d1d5db", linewidth=0.5)
@@ -911,7 +982,7 @@ def _section_projections(projection):
         for label, key, mode in proj_rows:
             if y < 0.10:
                 break
-            color = "#1e3a8a" if mode == "highlight" else "#374151"
+            color = C["primary"] if mode == "highlight" else C["text"]
             fw = "bold" if mode == "highlight" else "normal"
             fs = 9
             ax.text(0, y, label, fontsize=fs, color=color,
@@ -930,7 +1001,7 @@ def _section_projections(projection):
 
     if summary and y > 0.10:
         ax.text(0, y, "Tổng hợp dự phóng 5 năm", fontsize=12,
-                fontweight="bold", color="#1e3a8a", va="top")
+                fontweight="bold", color=C["primary"], va="top")
         y -= 0.026
         rows = [
             ("CAGR doanh thu 5Y", _fmt_pct_or_dash(summary.get("revenue_cagr_pct"))),
@@ -941,14 +1012,14 @@ def _section_projections(projection):
         if summary.get("comments"):
             y = _draw_block(ax, summary["comments"], x=0, y=y,
                             max_chars=98, max_lines=3, fontsize=10,
-                            color="#374151", line_height=0.020)
+                            color=C["text"], line_height=0.020)
     yield fig
 
     # Chart: revenue/EBITDA/FCFF over 5 years
     if projections:
         fig2 = plt.figure(figsize=A4)
         fig2.suptitle("8. Dự phóng — Biểu đồ", fontsize=16, fontweight="bold",
-                      color="#1f2937", x=0.08, y=0.96, ha="left")
+                      color=C["text_strong"], x=0.08, y=0.96, ha="left")
         ax_rev = fig2.add_axes([0.10, 0.55, 0.80, 0.32])
         years = [p.get("year_label", f"Y{i+1}") for i, p in enumerate(projections)]
         revenues = [p.get("revenue") or 0 for p in projections]
@@ -956,19 +1027,19 @@ def _section_projections(projection):
         fcffs = [p.get("fcff") or 0 for p in projections]
         x = range(len(years))
         ax_rev.bar([i - 0.2 for i in x], revenues, width=0.4, color="#3b82f6", label="Doanh thu")
-        ax_rev.bar([i + 0.2 for i in x], ebitdas, width=0.4, color="#10b981", label="EBITDA")
+        ax_rev.bar([i + 0.2 for i in x], ebitdas, width=0.4, color=C["good"], label="EBITDA")
         ax_rev.set_xticks(list(x)); ax_rev.set_xticklabels(years, fontsize=10)
         ax_rev.set_title("Doanh thu vs EBITDA", fontsize=12, fontweight="bold")
         ax_rev.legend(fontsize=9); ax_rev.grid(axis="y", linestyle=":", alpha=0.4)
         ax_fcf = fig2.add_axes([0.10, 0.10, 0.80, 0.32])
-        colors_fcf = ["#10b981" if v >= 0 else "#ef4444" for v in fcffs]
+        colors_fcf = [C["good"] if v >= 0 else C["poor"] for v in fcffs]
         ax_fcf.bar(years, fcffs, color=colors_fcf)
         for i, v in enumerate(fcffs):
             ax_fcf.text(i, v, _fmt_money(v), ha="center", va="bottom" if v >= 0 else "top",
-                        fontsize=9, color="#1f2937")
+                        fontsize=9, color=C["text_strong"])
         ax_fcf.set_title("Free Cash Flow to Firm (FCFF)", fontsize=12, fontweight="bold")
         ax_fcf.grid(axis="y", linestyle=":", alpha=0.4)
-        ax_fcf.axhline(0, color="#374151", linewidth=0.5)
+        ax_fcf.axhline(0, color=C["text"], linewidth=0.5)
         yield fig2
 
 
@@ -1001,30 +1072,30 @@ def _section_valuation(valuation, financials):
     if breakdown.get("rationale"):
         y = _draw_block(ax, f"Lý giải WACC: {breakdown['rationale']}", x=0, y=y,
                         max_chars=98, max_lines=3, fontsize=9,
-                        color="#6b7280", line_height=0.018)
+                        color=C["text_muted"], line_height=0.018)
         y -= 0.010
 
     pv_breakdown = dcf.get("pv_breakdown") or []
     if pv_breakdown:
         ax.text(0, y, "Chiết khấu FCFF", fontsize=12,
-                fontweight="bold", color="#1e3a8a", va="top")
+                fontweight="bold", color=C["primary"], va="top")
         y -= 0.024
-        ax.text(0, y, "Năm", fontsize=9, fontweight="bold", color="#6b7280", va="top")
-        ax.text(0.30, y, "FCFF", fontsize=9, fontweight="bold", color="#6b7280", va="top", ha="right")
-        ax.text(0.55, y, "Discount factor", fontsize=9, fontweight="bold", color="#6b7280", va="top", ha="right")
-        ax.text(0.85, y, "PV", fontsize=9, fontweight="bold", color="#6b7280", va="top", ha="right")
+        ax.text(0, y, "Năm", fontsize=9, fontweight="bold", color=C["text_muted"], va="top")
+        ax.text(0.30, y, "FCFF", fontsize=9, fontweight="bold", color=C["text_muted"], va="top", ha="right")
+        ax.text(0.55, y, "Discount factor", fontsize=9, fontweight="bold", color=C["text_muted"], va="top", ha="right")
+        ax.text(0.85, y, "PV", fontsize=9, fontweight="bold", color=C["text_muted"], va="top", ha="right")
         y -= 0.017
         ax.plot([0, 0.95], [y + 0.005, y + 0.005], color="#d1d5db", linewidth=0.5)
         for row in pv_breakdown:
             if y < 0.20:
                 break
-            ax.text(0, y, f"Y{row.get('year')}", fontsize=9, color="#374151", va="top")
+            ax.text(0, y, f"Y{row.get('year')}", fontsize=9, color=C["text"], va="top")
             ax.text(0.30, y, _fmt_money(row.get("fcff")), fontsize=9,
-                    color="#374151", va="top", ha="right")
+                    color=C["text"], va="top", ha="right")
             ax.text(0.55, y, f"{row.get('discount_factor'):.4f}",
-                    fontsize=9, color="#374151", va="top", ha="right")
+                    fontsize=9, color=C["text"], va="top", ha="right")
             ax.text(0.85, y, _fmt_money(row.get("pv")), fontsize=9,
-                    color="#374151", va="top", ha="right")
+                    color=C["text"], va="top", ha="right")
             y -= 0.020
         y -= 0.005
 
@@ -1044,7 +1115,7 @@ def _section_valuation(valuation, financials):
     fig2, ax2 = _new_page("9.2. Định giá Multiples (EV/EBITDA, P/E, P/B)")
     y = 0.93
     ax2.text(0, y, "Multiples giả định", fontsize=12,
-             fontweight="bold", color="#1e3a8a", va="top")
+             fontweight="bold", color=C["primary"], va="top")
     y -= 0.026
     rows = [
         ("EV/EBITDA", str(assumptions.get("ev_ebitda_multiple") or "—")),
@@ -1059,12 +1130,12 @@ def _section_valuation(valuation, financials):
         if assumptions.get(k):
             y = _draw_block(ax2, f"{label}: {assumptions[k]}", x=0, y=y,
                             max_chars=98, max_lines=2, fontsize=9,
-                            color="#6b7280", line_height=0.018)
+                            color=C["text_muted"], line_height=0.018)
             y -= 0.005
     y -= 0.015
 
     ax2.text(0, y, "Kết quả định giá theo Multiples", fontsize=12,
-             fontweight="bold", color="#1e3a8a", va="top")
+             fontweight="bold", color=C["primary"], va="top")
     y -= 0.026
     rows = []
     ev_e = multiples.get("ev_ebitda") or {}
@@ -1085,27 +1156,27 @@ def _section_valuation(valuation, financials):
     comps = assumptions.get("comparable_companies") or []
     if comps:
         ax2.text(0, y, "Comparable companies (DN niêm yết tương đương)",
-                 fontsize=12, fontweight="bold", color="#1e3a8a", va="top")
+                 fontsize=12, fontweight="bold", color=C["primary"], va="top")
         y -= 0.026
-        ax2.text(0, y, "Tên DN", fontsize=9, fontweight="bold", color="#6b7280", va="top")
-        ax2.text(0.40, y, "EV/EBITDA", fontsize=9, fontweight="bold", color="#6b7280", va="top", ha="right")
-        ax2.text(0.55, y, "P/E", fontsize=9, fontweight="bold", color="#6b7280", va="top", ha="right")
-        ax2.text(0.70, y, "P/B", fontsize=9, fontweight="bold", color="#6b7280", va="top", ha="right")
-        ax2.text(0.95, y, "Ghi chú", fontsize=9, fontweight="bold", color="#6b7280", va="top", ha="right")
+        ax2.text(0, y, "Tên DN", fontsize=9, fontweight="bold", color=C["text_muted"], va="top")
+        ax2.text(0.40, y, "EV/EBITDA", fontsize=9, fontweight="bold", color=C["text_muted"], va="top", ha="right")
+        ax2.text(0.55, y, "P/E", fontsize=9, fontweight="bold", color=C["text_muted"], va="top", ha="right")
+        ax2.text(0.70, y, "P/B", fontsize=9, fontweight="bold", color=C["text_muted"], va="top", ha="right")
+        ax2.text(0.95, y, "Ghi chú", fontsize=9, fontweight="bold", color=C["text_muted"], va="top", ha="right")
         y -= 0.017
         ax2.plot([0, 0.95], [y + 0.005, y + 0.005], color="#d1d5db", linewidth=0.5)
         for c in comps[:6]:
             if y < 0.05:
                 break
-            ax2.text(0, y, c.get("name") or "—", fontsize=9, color="#374151", va="top")
+            ax2.text(0, y, c.get("name") or "—", fontsize=9, color=C["text"], va="top")
             ax2.text(0.40, y, str(c.get("ev_ebitda") or "—"),
-                     fontsize=9, color="#374151", va="top", ha="right")
+                     fontsize=9, color=C["text"], va="top", ha="right")
             ax2.text(0.55, y, str(c.get("pe") or "—"),
-                     fontsize=9, color="#374151", va="top", ha="right")
+                     fontsize=9, color=C["text"], va="top", ha="right")
             ax2.text(0.70, y, str(c.get("pb") or "—"),
-                     fontsize=9, color="#374151", va="top", ha="right")
+                     fontsize=9, color=C["text"], va="top", ha="right")
             note = (c.get("note") or "")[:40]
-            ax2.text(0.95, y, note, fontsize=8.5, color="#6b7280", va="top", ha="right")
+            ax2.text(0.95, y, note, fontsize=8.5, color=C["text_muted"], va="top", ha="right")
             y -= 0.022
     yield fig2
 
@@ -1115,18 +1186,18 @@ def _section_valuation(valuation, financials):
     method_values = summary.get("method_values") or []
     if method_values:
         ax3.text(0, y, "Kết quả theo từng phương pháp", fontsize=12,
-                 fontweight="bold", color="#1e3a8a", va="top")
+                 fontweight="bold", color=C["primary"], va="top")
         y -= 0.026
-        ax3.text(0, y, "Phương pháp", fontsize=9.5, fontweight="bold", color="#6b7280", va="top")
-        ax3.text(0.55, y, "Equity Value", fontsize=9.5, fontweight="bold", color="#6b7280", va="top", ha="right")
+        ax3.text(0, y, "Phương pháp", fontsize=9.5, fontweight="bold", color=C["text_muted"], va="top")
+        ax3.text(0.55, y, "Equity Value", fontsize=9.5, fontweight="bold", color=C["text_muted"], va="top", ha="right")
         y -= 0.018
         ax3.plot([0, 0.85], [y + 0.005, y + 0.005], color="#d1d5db", linewidth=0.5)
         for mv in method_values:
             if y < 0.30:
                 break
-            ax3.text(0, y, mv.get("method") or "—", fontsize=10, color="#374151", va="top")
+            ax3.text(0, y, mv.get("method") or "—", fontsize=10, color=C["text"], va="top")
             ax3.text(0.55, y, _fmt_money(mv.get("equity_value")),
-                     fontsize=10, color="#374151", va="top", ha="right")
+                     fontsize=10, color=C["text"], va="top", ha="right")
             y -= 0.022
         y -= 0.015
 
@@ -1145,11 +1216,11 @@ def _section_valuation(valuation, financials):
 
     if assumptions.get("valuation_method_recommendation"):
         ax3.text(0, y, "Phương pháp khuyến nghị", fontsize=12,
-                 fontweight="bold", color="#1e3a8a", va="top")
+                 fontweight="bold", color=C["primary"], va="top")
         y -= 0.024
         y = _draw_block(ax3, assumptions["valuation_method_recommendation"],
                         x=0, y=y, max_chars=98, max_lines=4, fontsize=10,
-                        color="#374151", line_height=0.020)
+                        color=C["text"], line_height=0.020)
     yield fig3
 
 
@@ -1163,13 +1234,13 @@ def _section_sensitivity(valuation):
     fig, ax = _new_page("10. Phân tích Nhạy cảm (Sensitivity)")
     y = 0.93
     ax.text(0, y, "Bảng độ nhạy: Equity Value theo WACC × Terminal Growth",
-            fontsize=11, fontweight="bold", color="#1e3a8a", va="top")
+            fontsize=11, fontweight="bold", color=C["primary"], va="top")
     y -= 0.034
 
     growth_axis = sens.get("growth_axis_pct") or []
     if not matrix or not growth_axis:
         ax.text(0, y, "(Không đủ dữ liệu)", fontsize=10,
-                color="#9ca3af", va="top", style="italic")
+                color=C["text_dim"], va="top", style="italic")
         yield fig
         return
 
@@ -1178,11 +1249,11 @@ def _section_sensitivity(valuation):
     start_x = 0.05
 
     ax.text(start_x, y, "WACC \\ g", fontsize=9, fontweight="bold",
-            color="#6b7280", va="top")
+            color=C["text_muted"], va="top")
     for i, g in enumerate(growth_axis):
         x = start_x + (i + 1) * col_w
         ax.text(x + col_w / 2, y, f"g={g}%", fontsize=9,
-                fontweight="bold", color="#6b7280", va="top", ha="center")
+                fontweight="bold", color=C["text_muted"], va="top", ha="center")
     y -= 0.022
 
     base_w = sens.get("base_wacc_pct"); base_g = sens.get("base_growth_pct")
@@ -1202,7 +1273,7 @@ def _section_sensitivity(valuation):
             break
         w = row.get("wacc_pct")
         ax.text(start_x, y, f"WACC={w}%", fontsize=9,
-                fontweight="bold", color="#6b7280", va="top")
+                fontweight="bold", color=C["text_muted"], va="top")
         for i, v in enumerate(row.get("values", [])):
             x = start_x + (i + 1) * col_w
             ev = v.get("equity_value")
@@ -1217,17 +1288,17 @@ def _section_sensitivity(valuation):
             is_base = (abs(w - base_w) < 0.01) and (abs(g_val - base_g) < 0.01)
             ax.add_patch(Rectangle((x, y - 0.020), col_w, 0.020,
                                     facecolor=color,
-                                    edgecolor="#dc2626" if is_base else "#e5e7eb",
+                                    edgecolor=C["accent"] if is_base else C["border"],
                                     linewidth=1.5 if is_base else 0.5,
                                     transform=ax.transAxes))
             ax.text(x + col_w / 2, y - 0.012, label, fontsize=8.5,
-                    color="#1f2937", va="center", ha="center",
+                    color=C["text_strong"], va="center", ha="center",
                     fontweight="bold" if is_base else "normal")
         y -= 0.022
     y -= 0.020
 
     ax.text(0, y, "Cách đọc", fontsize=11,
-            fontweight="bold", color="#1e3a8a", va="top")
+            fontweight="bold", color=C["primary"], va="top")
     y -= 0.024
     notes = [
         f"Ô đỏ viền là kịch bản gốc: WACC={base_w}%, g={base_g}%.",
@@ -1238,7 +1309,7 @@ def _section_sensitivity(valuation):
         if y < 0.05:
             break
         y = _draw_bullet(ax, n, x=0, y=y, fontsize=9.5,
-                         color="#374151", max_chars=98, max_lines=2,
+                         color=C["text"], max_chars=98, max_lines=2,
                          line_height=0.018)
         y -= 0.005
     yield fig
@@ -1256,20 +1327,20 @@ def _section_conclusion(thesis, valuation):
 
     if val_comm.get("method_comparison"):
         ax.text(0, y, "So sánh phương pháp", fontsize=12,
-                fontweight="bold", color="#1e3a8a", va="top")
+                fontweight="bold", color=C["primary"], va="top")
         y -= 0.026
         y = _draw_block(ax, val_comm["method_comparison"], x=0, y=y,
                         max_chars=98, max_lines=4, fontsize=10,
-                        color="#374151", line_height=0.020)
+                        color=C["text"], line_height=0.020)
         y -= 0.015
 
     if val_comm.get("fair_value_view"):
         ax.text(0, y, "Quan điểm về giá trị hợp lý", fontsize=12,
-                fontweight="bold", color="#1e3a8a", va="top")
+                fontweight="bold", color=C["primary"], va="top")
         y -= 0.026
         y = _draw_block(ax, val_comm["fair_value_view"], x=0, y=y,
                         max_chars=98, max_lines=4, fontsize=10,
-                        color="#374151", line_height=0.020)
+                        color=C["text"], line_height=0.020)
         y -= 0.015
 
     rows = [
@@ -1286,13 +1357,13 @@ def _section_conclusion(thesis, valuation):
     governance = deal.get("post_deal_governance") or []
     if governance:
         ax.text(0, y, "Quản trị sau deal", fontsize=12,
-                fontweight="bold", color="#1e3a8a", va="top")
+                fontweight="bold", color=C["primary"], va="top")
         y -= 0.026
         for g in governance[:5]:
             if y < 0.10:
                 break
             y = _draw_bullet(ax, g, x=0, y=y, fontsize=10,
-                             color="#374151", max_chars=98, max_lines=2,
+                             color=C["text"], max_chars=98, max_lines=2,
                              line_height=0.020)
             y -= 0.005
         y -= 0.010
@@ -1300,13 +1371,13 @@ def _section_conclusion(thesis, valuation):
     next_steps = deal.get("next_steps") or []
     if next_steps:
         ax.text(0, y, "Bước tiếp theo", fontsize=12,
-                fontweight="bold", color="#10b981", va="top")
+                fontweight="bold", color=C["good"], va="top")
         y -= 0.026
         for i, s in enumerate(next_steps[:6], 1):
             if y < 0.05:
                 break
             y = _draw_bullet(ax, f"{i}. {s}", x=0, y=y, fontsize=10,
-                             color="#374151", max_chars=98, max_lines=3,
+                             color=C["text"], max_chars=98, max_lines=3,
                              line_height=0.020)
             y -= 0.005
     yield fig
@@ -1321,7 +1392,7 @@ def _section_appendix(valuation, projection, industry):
     fig, ax = _new_page("12. Phụ lục — Giả định & Tham số")
     y = 0.93
     ax.text(0, y, "12.1. Giả định Định giá", fontsize=12,
-            fontweight="bold", color="#1e3a8a", va="top")
+            fontweight="bold", color=C["primary"], va="top")
     y -= 0.026
     rows = [
         ("WACC", _fmt_pct_or_dash(assumptions_v.get("wacc_pct"))),
@@ -1335,7 +1406,7 @@ def _section_appendix(valuation, projection, industry):
     y -= 0.020
 
     ax.text(0, y, "12.2. Giả định Dự phóng", fontsize=12,
-            fontweight="bold", color="#1e3a8a", va="top")
+            fontweight="bold", color=C["primary"], va="top")
     y -= 0.026
     rows = [
         ("Tăng trưởng DT (Y1-Y5)",
@@ -1354,7 +1425,7 @@ def _section_appendix(valuation, projection, industry):
     y -= 0.020
 
     ax.text(0, y, "12.3. Comparable Companies", fontsize=12,
-            fontweight="bold", color="#1e3a8a", va="top")
+            fontweight="bold", color=C["primary"], va="top")
     y -= 0.026
     comps = assumptions_v.get("comparable_companies") or []
     if comps:
@@ -1363,11 +1434,11 @@ def _section_appendix(valuation, projection, industry):
                 break
             y = _draw_bullet(ax,
                 f"{c.get('name')} — EV/EBITDA={c.get('ev_ebitda') or '—'}, P/E={c.get('pe') or '—'}, P/B={c.get('pb') or '—'}",
-                x=0, y=y, fontsize=9.5, color="#374151",
+                x=0, y=y, fontsize=9.5, color=C["text"],
                 max_chars=98, max_lines=2, line_height=0.018)
             y -= 0.003
     else:
-        ax.text(0, y, "(Không có)", fontsize=10, color="#9ca3af", va="top", style="italic")
+        ax.text(0, y, "(Không có)", fontsize=10, color=C["text_dim"], va="top", style="italic")
     yield fig
 
 
@@ -1375,21 +1446,24 @@ def _section_appendix(valuation, projection, industry):
 
 def _new_page(title: str):
     fig = plt.figure(figsize=A4)
-    ax = fig.add_axes([0.07, 0.05, 0.86, 0.92])
+    ml = L["margin_left"]; mr = L["margin_right"]
+    mt = L["margin_top"]; mb = L["margin_bottom"]
+    ax = fig.add_axes([ml, mb, 1 - ml - mr, 1 - mt - mb])
     ax.axis("off"); ax.set_xlim(0, 1); ax.set_ylim(0, 1)
-    # subtle accent square + title
-    ax.add_patch(Rectangle((0, 0.965), 0.012, 0.025,
-                           facecolor="#1e3a8a", edgecolor="none",
+    # accent square + title
+    ax.add_patch(Rectangle((0, 0.965), L["header_accent_block"], 0.025,
+                           facecolor=C["primary"], edgecolor="none",
                            transform=ax.transAxes))
-    ax.text(0.022, 0.978, title, fontsize=15, fontweight="bold",
-            color="#1e3a8a", va="center")
-    ax.plot([0, 1], [0.955, 0.955], color="#1e3a8a", linewidth=1.2)
-    ax.plot([0, 0.18], [0.952, 0.952], color="#dc2626", linewidth=1.2)
+    ax.text(L["header_accent_block"] + 0.010, 0.978, title,
+            fontsize=S["page_title"], fontweight=WEIGHT_HEADER,
+            color=C["primary"], va="center")
+    ax.plot([0, 1], [0.955, 0.955], color=C["primary"], linewidth=L["header_rule_width"])
+    ax.plot([0, 0.18], [0.952, 0.952], color=C["accent"], linewidth=L["header_rule_width"])
     # footer
     ax.text(1, 0.005, "Báo cáo định giá doanh nghiệp",
-            fontsize=8, color="#9ca3af", ha="right", va="bottom",
+            fontsize=S["footnote"], color=C["text_dim"], ha="right", va="bottom",
             style="italic", transform=ax.transAxes)
-    ax.plot([0, 1], [0.022, 0.022], color="#e5e7eb", linewidth=0.6)
+    ax.plot([0, 1], [0.022, 0.022], color=C["border"], linewidth=L["footer_rule_width"])
     return fig, ax
 
 
@@ -1430,7 +1504,7 @@ def _draw_simple_table(ax, rows, x, y, col_widths, line_height, highlight_last=F
         for i, cell in enumerate(row):
             w = col_widths[i] if i < len(col_widths) else 0.20
             text = "" if cell is None else str(cell)
-            color = "#1e3a8a" if is_last else "#374151"
+            color = C["primary"] if is_last else C["text"]
             fw = "bold" if (is_last or i == 0) else "normal"
             fs = 11 if is_last else 10
             ha = "left"
@@ -1439,7 +1513,7 @@ def _draw_simple_table(ax, rows, x, y, col_widths, line_height, highlight_last=F
             cur_x += w
         if is_last:
             ax.plot([x, x + sum(col_widths)], [y - 0.003, y - 0.003],
-                    color="#1e3a8a", linewidth=1)
+                    color=C["primary"], linewidth=1)
         y -= line_height
     return y
 
@@ -1450,9 +1524,9 @@ def _draw_kv_grid(ax, items, x, y, col_widths, cols=2, line_height=0.024):
         row = i // cols
         cx = x + col * (col_widths[0] + col_widths[1] + 0.04)
         cy = y - row * line_height
-        ax.text(cx, cy, k, fontsize=9, color="#6b7280", va="top")
+        ax.text(cx, cy, k, fontsize=9, color=C["text_muted"], va="top")
         ax.text(cx + col_widths[0], cy, str(v), fontsize=10,
-                color="#1f2937", va="top", fontweight="bold")
+                color=C["text_strong"], va="top", fontweight="bold")
     rows = (len(items) + cols - 1) // cols
     return y - rows * line_height
 
@@ -1464,14 +1538,14 @@ def _draw_table(ax, rows, x, y, width, line_height, show_prev, cur_label, prev_l
     chg_x = x + width * 0.99
 
     ax.text(label_x, y, "Khoản mục", fontsize=9, fontweight="bold",
-            color="#6b7280", va="top")
+            color=C["text_muted"], va="top")
     ax.text(cur_x, y, cur_label, fontsize=9, fontweight="bold",
-            color="#6b7280", va="top", ha="right")
+            color=C["text_muted"], va="top", ha="right")
     if show_prev:
         ax.text(prev_x, y, prev_label, fontsize=9, fontweight="bold",
-                color="#6b7280", va="top", ha="right")
+                color=C["text_muted"], va="top", ha="right")
         ax.text(chg_x, y, "Δ%", fontsize=9, fontweight="bold",
-                color="#6b7280", va="top", ha="right")
+                color=C["text_muted"], va="top", ha="right")
     y -= line_height
     ax.plot([x, x + width], [y + 0.003, y + 0.003], color="#d1d5db", linewidth=0.7)
     y -= 0.005
@@ -1481,20 +1555,20 @@ def _draw_table(ax, rows, x, y, width, line_height, show_prev, cur_label, prev_l
             break
         if level == "header":
             ax.text(label_x, y, label, fontsize=11, fontweight="bold",
-                    color="#1f2937", va="top")
+                    color=C["text_strong"], va="top")
             y -= line_height
             continue
         if level == "subheader":
             ax.text(label_x + 0.005, y, label, fontsize=10, fontweight="bold",
-                    color="#374151", va="top", style="italic")
+                    color=C["text"], va="top", style="italic")
             y -= line_height
             continue
         if level == "grand":
-            font_w = "bold"; color = "#1f2937"; fs = 10
+            font_w = "bold"; color = C["text_strong"]; fs = 10
         elif level == "total":
-            font_w = "bold"; color = "#374151"; fs = 9.5
+            font_w = "bold"; color = C["text"]; fs = 9.5
         else:
-            font_w = "normal"; color = "#374151"; fs = 9
+            font_w = "normal"; color = C["text"]; fs = 9
             label = "  " + label
         ax.text(label_x, y, label, fontsize=fs, fontweight=font_w,
                 color=color, va="top")
@@ -1502,16 +1576,16 @@ def _draw_table(ax, rows, x, y, width, line_height, show_prev, cur_label, prev_l
                 fontweight=font_w, color=color, va="top", ha="right")
         if show_prev:
             ax.text(prev_x, y, _fmt_money(pv), fontsize=fs,
-                    color="#6b7280", va="top", ha="right")
+                    color=C["text_muted"], va="top", ha="right")
             chg_pct = _percent_change(cv, pv)
-            chg_color = "#374151"
+            chg_color = C["text"]
             if chg_pct is not None:
-                chg_color = "#10b981" if chg_pct > 0 else ("#ef4444" if chg_pct < 0 else "#6b7280")
+                chg_color = C["good"] if chg_pct > 0 else (C["poor"] if chg_pct < 0 else C["text_muted"])
             ax.text(chg_x, y, _fmt_pct_signed_pct(chg_pct),
                     fontsize=fs - 0.5, color=chg_color, va="top", ha="right")
         if level == "grand":
             ax.plot([x, x + width], [y - 0.002, y - 0.002],
-                    color="#9ca3af", linewidth=0.5)
+                    color=C["text_dim"], linewidth=0.5)
         y -= line_height
 
 
@@ -1658,12 +1732,12 @@ def _report_cover_page(trace):
     ax.text(0.5, 0.72, "Báo cáo Debug", ha="center", va="center",
             fontsize=30, fontweight="bold", color="#111827")
     ax.text(0.5, 0.66, "Trace input + output mọi agent",
-            ha="center", va="center", fontsize=14, color="#6b7280")
-    ax.plot([0.20, 0.80], [0.62, 0.62], color="#dc2626", linewidth=2)
+            ha="center", va="center", fontsize=14, color=C["text_muted"])
+    ax.plot([0.20, 0.80], [0.62, 0.62], color=C["accent"], linewidth=2)
     ax.text(0.5, 0.55, f"Job: {trace.get('job_id','?')}",
-            ha="center", va="center", fontsize=12, color="#374151")
+            ha="center", va="center", fontsize=12, color=C["text"])
     ax.text(0.5, 0.50, datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-            ha="center", va="center", fontsize=11, color="#9ca3af")
+            ha="center", va="center", fontsize=11, color=C["text_dim"])
     return fig
 
 
@@ -1685,7 +1759,7 @@ def _make_section_page(title, lines):
     ax = fig.add_axes([0.07, 0.05, 0.86, 0.92])
     ax.axis("off"); ax.set_xlim(0, 1); ax.set_ylim(0, 1)
     ax.text(0, 0.98, title, fontsize=16, fontweight="bold",
-            color="#dc2626", va="top")
+            color=C["accent"], va="top")
     ax.plot([0, 1], [0.955, 0.955], color="#fee2e2", linewidth=1)
     y = 0.93
     line_h = 0.018
@@ -1695,10 +1769,10 @@ def _make_section_page(title, lines):
         if kind == "__field__":
             y -= 0.005
             ax.text(0, y, content, fontsize=11, fontweight="bold",
-                    color="#1f2937", va="top")
+                    color=C["text_strong"], va="top")
             y -= line_h
         else:
-            ax.text(0, y, content, fontsize=8.5, color="#374151",
+            ax.text(0, y, content, fontsize=8.5, color=C["text"],
                     va="top", family="monospace")
             y -= line_h
     return fig

@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Pipeline 8 Agents — Định giá DN</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: linear-gradient(135deg, #f0f9ff 0%, #faf5ff 100%);
+    min-height: 100vh;
+    padding: 32px 16px;
+    color: #111827;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  .card {
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 20px 50px -20px rgba(0,0,0,0.18);
+    padding: 32px;
+  }
+  h1 { margin: 0 0 4px; font-size: 26px; color: #1e3a8a; }
+  .sub { color: #6b7280; margin-bottom: 24px; font-size: 14px; }
+  .topnav { margin-bottom: 18px; font-size: 13px; }
+  .topnav a {
+    color: #1e3a8a; text-decoration: none; font-weight: 600;
+    padding: 6px 12px; border-radius: 6px; background: #eff6ff;
+    display: inline-block;
+  }
+  .topnav a:hover { background: #dbeafe; }
+
+  .legend {
+    display: flex; gap: 12px; flex-wrap: wrap;
+    background: #f9fafb; border-radius: 10px; padding: 12px 14px; margin-bottom: 22px;
+    font-size: 12px; color: #4b5563;
+  }
+  .legend b { color: #1e3a8a; }
+
+  .pipeline {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 14px;
+  }
+  .agent {
+    border-radius: 12px;
+    padding: 18px;
+    border: 1px solid #e5e7eb;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    position: relative;
+  }
+  .agent .num {
+    position: absolute; top: -10px; left: 16px;
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: #1e3a8a; color: #fff;
+    font-size: 13px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 12px -4px rgba(30,58,138,0.5);
+  }
+  .agent.parallel .num { background: #059669; }
+  .agent.render .num { background: #dc2626; }
+
+  .agent h3 {
+    margin: 4px 0 6px;
+    font-size: 16px;
+    color: #1e3a8a;
+    font-weight: 700;
+  }
+  .agent.parallel h3 { color: #047857; }
+  .agent.render h3 { color: #b91c1c; }
+
+  .agent .role {
+    font-size: 12px; color: #6b7280;
+    margin-bottom: 12px; font-style: italic;
+  }
+  .row { display: flex; gap: 8px; margin-bottom: 6px; font-size: 12.5px; }
+  .row .k {
+    flex: 0 0 70px;
+    color: #6b7280; font-weight: 600;
+  }
+  .row .v { color: #374151; flex: 1; }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    background: #eff6ff;
+    color: #1e3a8a;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-right: 4px;
+  }
+  .badge.parallel { background: #d1fae5; color: #065f46; }
+  .badge.fast { background: #fef3c7; color: #92400e; }
+  .badge.thinking { background: #ede9fe; color: #5b21b6; }
+
+  .flow {
+    margin: 24px 0 18px;
+    padding: 16px 20px;
+    background: #f1f5f9;
+    border-radius: 10px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12.5px;
+    color: #334155;
+    overflow-x: auto;
+    white-space: pre;
+    line-height: 1.6;
+  }
+  .footer {
+    margin-top: 26px;
+    padding-top: 18px;
+    border-top: 1px solid #e5e7eb;
+    font-size: 12px;
+    color: #9ca3af;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+  <div class="topnav"><a href="/">← Quay về trang định giá</a></div>
+  <h1>Pipeline 8 Agents</h1>
+  <p class="sub">Tài liệu nội bộ — mỗi agent là một LLM call (Anthropic Opus 4.7) hoặc tính toán thuần số, chạy theo thứ tự / song song. Tổng thời gian thường 180–300s/file BCTC.</p>
+
+  <div class="legend">
+    <span><b>Tuần tự</b> = phải đợi agent trước</span>
+    <span><b style="color:#059669">Song song</b> = chạy đồng thời với agent khác</span>
+    <span><b style="color:#dc2626">Render</b> = không gọi LLM, chỉ vẽ PDF/Excel</span>
+    <span class="badge thinking">extended thinking</span>
+    <span class="badge fast">tính toán thuần</span>
+  </div>
+
+  <div class="flow">[Upload BCTC]
+   │
+   ▼
+[A1] Extractor ──────► financials (BCĐKT, KQKD, LCTT, công ty, kỳ)
+   │
+   ├──────► [A2] Industry  ─┐
+   ├──────► [A4] Ratios     ├─► [A3] Business Profile
+   │                        │
+   │                        ▼
+   ├────────────────────► [A5] Projector (5Y)
+   │                        │
+   │                        ▼
+   │                     [A6] Valuator (DCF + Multiples + Sensitivity)
+   │                        │
+   │                        ▼
+   │                     [A7] Thesis Writer (Investment Memo)
+   │                        │
+   │                        ▼
+   └────────────────────► [A8] Renderer ──► PDF + Excel + Debug</div>
+
+  <div class="pipeline">
+
+    <div class="agent">
+      <div class="num">1</div>
+      <h3>Extractor — OCR & Trích xuất BCTC</h3>
+      <div class="role">Đọc PDF/ảnh BCTC → JSON tài chính chuẩn hóa</div>
+      <div class="row"><div class="k">Input</div><div class="v">PDF / PNG / JPG BCTC</div></div>
+      <div class="row"><div class="k">Output</div><div class="v">company, period, unit, balance_sheet, income_statement, cash_flow</div></div>
+      <div class="row"><div class="k">Model</div><div class="v"><span class="badge thinking">Opus 4.7 + thinking</span> vision</div></div>
+      <div class="row"><div class="k">Phụ thuộc</div><div class="v">— (đầu tiên)</div></div>
+    </div>
+
+    <div class="agent parallel">
+      <div class="num">2</div>
+      <h3>Industry Analyst — Phân tích ngành</h3>
+      <div class="role">TAM/SAM/SOM, CAGR, đối thủ, rào cản gia nhập, rủi ro ngành</div>
+      <div class="row"><div class="k">Input</div><div class="v">financials (A1)</div></div>
+      <div class="row"><div class="k">Output</div><div class="v">industry_name, market_size, drivers, trends, competitors, risks</div></div>
+      <div class="row"><div class="k">Model</div><div class="v"><span class="badge thinking">Opus 4.7 + thinking</span></div></div>
+      <div class="row"><div class="k">Phụ thuộc</div><div class="v">A1 · <span class="badge parallel">song song A4</span></div></div>
+    </div>
+
+    <div class="agent">
+      <div class="num">3</div>
+      <h3>Business Profile — Tổng quan DN</h3>
+      <div class="role">Mô hình KD, value chain, unit economics, vị thế cạnh tranh</div>
+      <div class="row"><div class="k">Input</div><div class="v">financials + industry (A2)</div></div>
+      <div class="row"><div class="k">Output</div><div class="v">business_model, value_chain, unit_economics, growth_stage, competitive_position</div></div>
+      <div class="row"><div class="k">Model</div><div class="v"><span class="badge thinking">Opus 4.7 + thinking</span></div></div>
+      <div class="row"><div class="k">Phụ thuộc</div><div class="v">A1, A2</div></div>
+    </div>
+
+    <div class="agent parallel">
+      <div class="num">4</div>
+      <h3>Analyzer — Tỷ số tài chính</h3>
+      <div class="role">17 tỷ số (thanh khoản, đòn bẩy, sinh lời, hiệu quả) + tăng trưởng YoY</div>
+      <div class="row"><div class="k">Input</div><div class="v">financials (A1)</div></div>
+      <div class="row"><div class="k">Output</div><div class="v">ratios.current, ratios.prior, growth.yoy</div></div>
+      <div class="row"><div class="k">Model</div><div class="v"><span class="badge fast">tính toán thuần (không LLM)</span></div></div>
+      <div class="row"><div class="k">Phụ thuộc</div><div class="v">A1 · <span class="badge parallel">song song A2</span></div></div>
+    </div>
+
+    <div class="agent">
+      <div class="num">5</div>
+      <h3>Projector — Dự phóng 5 năm</h3>
+      <div class="role">Doanh thu, chi phí, EBITDA, FCF cho 5 năm tiếp theo</div>
+      <div class="row"><div class="k">Input</div><div class="v">financials + ratios + industry</div></div>
+      <div class="row"><div class="k">Output</div><div class="v">projection.years[5], assumptions, sensitivity_drivers</div></div>
+      <div class="row"><div class="k">Model</div><div class="v"><span class="badge thinking">Opus 4.7 + thinking</span></div></div>
+      <div class="row"><div class="k">Phụ thuộc</div><div class="v">A1, A2, A4</div></div>
+    </div>
+
+    <div class="agent">
+      <div class="num">6</div>
+      <h3>Valuator — DCF + Multiples + Sensitivity</h3>
+      <div class="role">Định giá theo nhiều phương pháp, tổng hợp fair value range</div>
+      <div class="row"><div class="k">Input</div><div class="v">financials + ratios + industry + projection</div></div>
+      <div class="row"><div class="k">Output</div><div class="v">dcf, multiples, sensitivity, summary (fair_value_low/mid/high)</div></div>
+      <div class="row"><div class="k">Model</div><div class="v"><span class="badge thinking">Opus 4.7 + thinking</span></div></div>
+      <div class="row"><div class="k">Phụ thuộc</div><div class="v">A1, A2, A4, A5</div></div>
+    </div>
+
+    <div class="agent">
+      <div class="num">7</div>
+      <h3>Thesis Writer — Investment Memo</h3>
+      <div class="role">Luận điểm, catalysts, rủi ro, khuyến nghị deal</div>
+      <div class="row"><div class="k">Input</div><div class="v">tất cả output A1–A6</div></div>
+      <div class="row"><div class="k">Output</div><div class="v">executive_summary, investment_thesis, deal_recommendation, operations_analysis</div></div>
+      <div class="row"><div class="k">Model</div><div class="v"><span class="badge thinking">Opus 4.7 + thinking</span></div></div>
+      <div class="row"><div class="k">Phụ thuộc</div><div class="v">A1–A6 (đợi tất cả)</div></div>
+    </div>
+
+    <div class="agent render">
+      <div class="num">8</div>
+      <h3>Renderer — PDF + Excel</h3>
+      <div class="role">Vẽ báo cáo 12 mục thành nhiều file PDF + 1 file Excel dữ liệu</div>
+      <div class="row"><div class="k">Input</div><div class="v">tất cả payload A1–A7</div></div>
+      <div class="row"><div class="k">Output</div><div class="v">12 PDF mục lẻ + 1 PDF đầy đủ + 1 XLSX + 1 debug PDF + 1 trace JSON</div></div>
+      <div class="row"><div class="k">Model</div><div class="v"><span class="badge fast">matplotlib + openpyxl (không LLM)</span></div></div>
+      <div class="row"><div class="k">Phụ thuộc</div><div class="v">A1–A7</div></div>
+    </div>
+
+  </div>
+
+  <div class="footer">
+    Pipeline orchestrator: <code>main.py</code> · Style tokens: <code>agents/report_style.py</code> · Render: <code>agents/renderer.py</code> · Excel: <code>agents/excel_writer.py</code>
+  </div>
+</div></div>
+</body>
+</html>
