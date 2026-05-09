@@ -150,11 +150,17 @@ async def process(file: UploadFile = File(...)) -> dict:
         log.info("[%s] agent8a done: %d pages, %d sections",
                  job_id, a8_render["total_pages"], len(a8_render["section_files"]))
 
-        # ---- Agent 8b: Excel
+        # ---- Agent 8b: Excel — chạy defensive để 1 sheet hỏng KHÔNG kéo cả pipeline crash.
+        # Mọi lỗi schema ở đây trở thành sheet "⚠ <name>" trong file XLSX.
         log.info("[%s] agent8b: rendering Excel", job_id)
-        a8_excel = await asyncio.to_thread(export_excel, payload, str(excel_path))
-        trace["agent8_excel"] = a8_excel
-        log.info("[%s] agent8b done: %s sheets", job_id, len(a8_excel.get("sheets") or []))
+        try:
+            a8_excel = await asyncio.to_thread(export_excel, payload, str(excel_path))
+            trace["agent8_excel"] = a8_excel
+            log.info("[%s] agent8b done: %s sheets", job_id, len(a8_excel.get("sheets") or []))
+        except Exception as exc:
+            log.exception("[%s] agent8b: Excel export failed", job_id)
+            a8_excel = {"error": repr(exc), "sheets": []}
+            trace["agent8_excel"] = a8_excel
 
     except HTTPException:
         upload_path.unlink(missing_ok=True)
@@ -224,60 +230,76 @@ async def process(file: UploadFile = File(...)) -> dict:
 
 
 def _file_manifest(job_id: str, render_meta: dict, excel_meta: dict) -> list[dict]:
-    """Liệt kê toàn bộ file output để frontend hiển thị + cho phép download riêng từng cái."""
+    """Liệt kê file output để frontend hiển thị + cho phép download riêng từng cái.
+    Chỉ list những file thật sự tồn tại trên disk (tránh đưa link 404 cho user)."""
     items = []
+    job_dir = OUTPUT_DIR / job_id
+
     # Full PDF.
-    full_size = render_meta.get("full_pdf_size_bytes") or 0
-    full_pages = render_meta.get("total_pages") or 0
-    items.append({
-        "kind": "full",
-        "title": "Báo cáo đầy đủ (toàn bộ 12 mục)",
-        "category": "pdf_full",
-        "format": "PDF",
-        "pages": full_pages,
-        "size_bytes": full_size,
-        "url": f"/api/download/{job_id}/full",
-    })
+    full_pdf = job_dir / "full.pdf"
+    if full_pdf.exists():
+        items.append({
+            "kind": "full",
+            "title": "Báo cáo đầy đủ (toàn bộ 12 mục)",
+            "category": "pdf_full",
+            "format": "PDF",
+            "pages": render_meta.get("total_pages") or 0,
+            "size_bytes": full_pdf.stat().st_size,
+            "url": f"/api/download/{job_id}/full",
+        })
+
     # Per-section PDFs.
     for f in render_meta.get("section_files") or []:
+        section_path = job_dir / f.get("file_name", "")
+        if not section_path.exists():
+            continue
         items.append({
             "kind": f["kind"],
             "title": f["title"],
             "category": "pdf_section",
             "format": "PDF",
             "pages": f["pages"],
-            "size_bytes": f["size_bytes"],
+            "size_bytes": section_path.stat().st_size,
             "url": f"/api/download/{job_id}/section/{f['kind']}",
         })
-    # Excel.
-    items.append({
-        "kind": "excel",
-        "title": "Dữ liệu tài chính (10 sheet)",
-        "category": "excel",
-        "format": "XLSX",
-        "pages": None,
-        "size_bytes": excel_meta.get("size_bytes") or 0,
-        "url": f"/api/download/{job_id}/excel",
-    })
+
+    # Excel — chỉ thêm nếu file ra được trên disk.
+    excel_path = job_dir / "data.xlsx"
+    if excel_path.exists():
+        sheet_count = len(excel_meta.get("sheets") or [])
+        items.append({
+            "kind": "excel",
+            "title": f"Dữ liệu tài chính ({sheet_count} sheet)" if sheet_count else "Dữ liệu tài chính",
+            "category": "excel",
+            "format": "XLSX",
+            "pages": None,
+            "size_bytes": excel_path.stat().st_size,
+            "url": f"/api/download/{job_id}/excel",
+        })
+
     # Debug + trace.
-    items.append({
-        "kind": "debug",
-        "title": "Debug PDF (trace mọi agent)",
-        "category": "debug",
-        "format": "PDF",
-        "pages": None,
-        "size_bytes": None,
-        "url": f"/api/download/{job_id}/debug",
-    })
-    items.append({
-        "kind": "trace",
-        "title": "Trace JSON",
-        "category": "debug",
-        "format": "JSON",
-        "pages": None,
-        "size_bytes": None,
-        "url": f"/api/download/{job_id}/trace",
-    })
+    debug_path = job_dir / "debug.pdf"
+    if debug_path.exists():
+        items.append({
+            "kind": "debug",
+            "title": "Debug PDF (trace mọi agent)",
+            "category": "debug",
+            "format": "PDF",
+            "pages": None,
+            "size_bytes": debug_path.stat().st_size,
+            "url": f"/api/download/{job_id}/debug",
+        })
+    trace_path = job_dir / "trace.json"
+    if trace_path.exists():
+        items.append({
+            "kind": "trace",
+            "title": "Trace JSON",
+            "category": "debug",
+            "format": "JSON",
+            "pages": None,
+            "size_bytes": trace_path.stat().st_size,
+            "url": f"/api/download/{job_id}/trace",
+        })
     return items
 
 
