@@ -79,7 +79,7 @@ QUY TẮC:
     message = _client.messages.create(
         model=_MODEL,
         max_tokens=6000,
-        temperature=0,  # determinism: cùng input phải cho cùng output giữa các lần chạy
+        # Anthropic API yêu cầu temperature=1 khi thinking bật → giữ default + thinking adaptive.
         thinking={"type": "adaptive"},
         output_config={"effort": _EFFORT},
         messages=[{"role": "user", "content": user_prompt}],

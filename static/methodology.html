@@ -173,7 +173,13 @@
   </div>
 
   <div style="background:#dbeafe; border:1px solid #3b82f6; border-radius:10px; padding:14px 18px; margin-bottom:22px; font-size:13.5px; color:#1e40af">
-    <b>🎯 Determinism</b> — Tất cả 6 agent gọi LLM giờ đều set <code>temperature=0</code>, nên cùng 1 file BCTC sẽ cho output ổn định giữa các lần chạy. Vẫn có thể có chênh lệch nhỏ ở các số ước lượng (TAM/SAM, multiples ngành) do bản chất judgment của LLM, nhưng số liệu trích xuất từ BCTC + tỷ số + DCF math sẽ y hệt.
+    <b>🎯 Determinism — chiến lược 2 tầng</b>
+    <ul style="margin:6px 0 0 18px; padding:0; line-height:1.7">
+      <li><b>Industry agent</b> (TAM/SAM/SOM, đối thủ — chỗ user thấy chênh lệch nhất 2 lần test) đã chuyển sang chế độ <b>FULL DETERMINISTIC</b>: tắt extended thinking + temperature=0. Cùng BCTC → cùng số ổn định.</li>
+      <li>5 agent còn lại (extractor, business, projector, valuator, thesis) <b>giữ extended thinking</b> để reasoning sâu — Anthropic API yêu cầu temperature=1 khi thinking bật, nên có variance nhỏ. Tuy nhiên các agent này chủ yếu reasoning từ <b>số liệu CỤ THỂ trong BCTC</b> nên variance thực tế thấp.</li>
+      <li>Mọi tính toán <b>Python deterministic</b> (tỷ số, DCF math, growth, multiples math) cho số y hệt 100%.</li>
+      <li>Muốn rerun với assumption cố định (vd WACC = 16% thay vì AI đề xuất 14%): mở Excel sheet <i>Định giá</i>, sửa ô vàng trong INPUTS block — toàn bộ DCF re-compute live.</li>
+    </ul>
   </div>
 
   <div class="legend">

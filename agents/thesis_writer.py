@@ -117,7 +117,7 @@ QUY TẮC:
     message = _client.messages.create(
         model=_MODEL,
         max_tokens=12000,
-        temperature=0,  # determinism
+        # API yêu cầu temperature=1 khi thinking bật.
         thinking={"type": "adaptive"},
         output_config={"effort": _EFFORT},
         messages=[{"role": "user", "content": user_prompt}],

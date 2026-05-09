@@ -152,7 +152,8 @@ def extract(file_path: str) -> dict:
     message = _client.messages.create(
         model=_MODEL,
         max_tokens=16000,
-        temperature=0,  # determinism: cùng BCTC phải cho cùng số liệu trích xuất
+        # API yêu cầu temperature=1 khi thinking bật. Trích xuất BCTC ít variance
+        # vì Claude đọc cùng numbers từ cùng image → output gần như identical.
         thinking={"type": "adaptive"},
         output_config={"effort": _EFFORT},
         messages=[

@@ -120,7 +120,9 @@ QUY TẮC:
     message = _client.messages.create(
         model=_MODEL,
         max_tokens=8000,
-        temperature=0,  # determinism: WACC/multiples phải ổn định giữa các lần chạy
+        # API yêu cầu temperature=1 khi thinking bật. WACC/multiples assumptions
+        # vẫn có variance nhỏ — kế toán có thể override trong INPUTS block của
+        # sheet "Định giá" (ô vàng) nếu muốn rerun với assumption cố định.
         thinking={"type": "adaptive"},
         output_config={"effort": _EFFORT},
         messages=[{"role": "user", "content": user_prompt}],

@@ -66,13 +66,16 @@ QUY TẮC:
 - Tiếng Việt chuyên nghiệp.
 """
 
+    # User test 2 lần thấy TAM/SAM/SOM khác nhau nhiều → đổi sang DETERMINISTIC mode:
+    # tắt extended thinking + temperature=0 để Claude trả ổn định nhất có thể.
+    # Đánh đổi: thinking giúp reasoning sâu hơn, nhưng cho TAM/SAM (essentially
+    # estimation từ training data) thì consistency > nuance reasoning.
+    # Anthropic API chỉ cho phép temperature=0 khi thinking TẮT.
     t0 = time.time()
     message = _client.messages.create(
         model=_MODEL,
         max_tokens=8000,
-        temperature=0,  # determinism: TAM/SAM/SOM phải ổn định giữa các lần chạy
-        thinking={"type": "adaptive"},
-        output_config={"effort": _EFFORT},
+        temperature=0,
         messages=[{"role": "user", "content": user_prompt}],
     )
     elapsed = time.time() - t0
