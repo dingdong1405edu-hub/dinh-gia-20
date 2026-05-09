@@ -70,25 +70,105 @@
   .stage {
     display: none;
     margin-top: 14px;
-    padding: 14px 16px;
-    background: #fef3c7;
-    color: #92400e;
-    border-radius: 8px;
+    padding: 16px;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
     font-size: 14px;
   }
   .stage.show { display: block; }
-  .stage-progress {
-    display: flex; gap: 4px; margin-top: 10px; flex-wrap: wrap;
+  .stage-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 12px; padding-bottom: 10px;
+    border-bottom: 1px solid #e5e7eb;
   }
-  .stage-step {
-    flex: 1; min-width: 60px;
-    padding: 4px 6px; font-size: 10px; text-align: center;
-    border-radius: 4px;
-    background: #fff; color: #9ca3af;
+  .stage-title { font-weight: 700; color: #1e3a8a; font-size: 14px; }
+  .stage-jobid { font-size: 11px; color: #9ca3af; font-family: ui-monospace, monospace; }
+  .stage-elapsed { font-size: 12px; color: #6b7280; font-weight: 600; }
+
+  .live-agents { display: flex; flex-direction: column; gap: 6px; }
+  .live-agent {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px;
     border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #fafafa;
+    transition: all 0.2s;
   }
-  .stage-step.done { background: #d1fae5; color: #065f46; border-color: #a7f3d0; }
-  .stage-step.active { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+  .live-agent.pending {
+    background: #fafafa; color: #9ca3af; border-color: #e5e7eb;
+  }
+  .live-agent.running {
+    background: linear-gradient(90deg, #fef3c7 0%, #fffbeb 100%);
+    border-color: #fbbf24; color: #92400e;
+    box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.15);
+  }
+  .live-agent.done {
+    background: #f0fdf4; border-color: #86efac; color: #166534;
+  }
+  .live-agent.error {
+    background: #fef2f2; border-color: #fca5a5; color: #991b1b;
+  }
+  .live-agent .icon {
+    flex-shrink: 0;
+    width: 24px; height: 24px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.7);
+  }
+  .live-agent.running .icon::after {
+    content: ''; display: block;
+    width: 12px; height: 12px;
+    border: 2px solid currentColor; border-top-color: transparent;
+    border-radius: 50%; animation: spin 0.7s linear infinite;
+  }
+  .live-agent.done .icon::before { content: '✓'; color: #16a34a; }
+  .live-agent.error .icon::before { content: '✗'; color: #dc2626; }
+  .live-agent.pending .icon::before { content: '○'; color: #d1d5db; }
+  .live-agent .label {
+    flex: 1; min-width: 0;
+    font-weight: 500;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .live-agent.running .label { font-weight: 600; }
+  .live-agent .meta {
+    flex-shrink: 0;
+    font-size: 11px; color: #6b7280;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  .live-agent.error .meta { color: #991b1b; }
+  .live-agent .err-msg {
+    width: 100%;
+    margin-top: 6px;
+    padding: 8px 10px;
+    background: #fee2e2;
+    border-radius: 6px;
+    font-size: 12px;
+    color: #991b1b;
+    font-family: ui-monospace, monospace;
+    word-break: break-word;
+    line-height: 1.5;
+  }
+  .live-agent.error { flex-wrap: wrap; }
+
+  .global-error {
+    margin-top: 14px;
+    padding: 14px 16px;
+    background: #fef2f2; border: 2px solid #fca5a5;
+    border-radius: 10px;
+    font-size: 13px; color: #991b1b;
+    line-height: 1.5;
+  }
+  .global-error b { display: block; margin-bottom: 6px; font-size: 14px; }
+  .global-error .err-tb {
+    margin-top: 8px; padding: 8px 10px;
+    background: #fff5f5; border-radius: 6px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px; color: #7f1d1d;
+    max-height: 180px; overflow-y: auto;
+    white-space: pre-wrap; word-break: break-word;
+  }
 
   .result-card {
     display: none;
@@ -271,16 +351,15 @@
   <button class="primary" id="submit" disabled>Phân tích & Định giá</button>
 
   <div class="stage" id="stage">
-    <div id="stage-text">⏳ Đang xử lý...</div>
-    <div class="stage-progress" id="stage-progress">
-      <div class="stage-step" data-i="0">1. Trích BCTC</div>
-      <div class="stage-step" data-i="1">2+4. Ngành / Tỷ số</div>
-      <div class="stage-step" data-i="2">3. Tổng quan DN</div>
-      <div class="stage-step" data-i="3">5. Dự phóng</div>
-      <div class="stage-step" data-i="4">6. Định giá</div>
-      <div class="stage-step" data-i="5">7. Thesis</div>
-      <div class="stage-step" data-i="6">8. Render</div>
+    <div class="stage-header">
+      <div>
+        <span class="stage-title" id="stage-title">⏳ Đang chạy pipeline...</span>
+        <span class="stage-jobid" id="stage-jobid"></span>
+      </div>
+      <span class="stage-elapsed" id="stage-elapsed"></span>
     </div>
+    <div class="live-agents" id="live-agents"></div>
+    <div class="global-error" id="global-error" style="display:none"></div>
   </div>
 
   <div class="result-card" id="result-card">
@@ -323,7 +402,14 @@ const resultCard = document.getElementById('result-card');
 const errorEl = document.getElementById('error');
 
 let selected = null;
-let progressTimer = null;
+let pollTimer = null;
+let elapsedTimer = null;
+let elapsedStart = 0;
+const AGENT_ORDER = [
+  'agent1_extract', 'agent2_industry', 'agent4_ratios', 'agent3_business',
+  'agent5_projector', 'agent6_valuator', 'agent7_thesis',
+  'agent8_renderer', 'agent8_excel', 'agent8_debug'
+];
 
 function setFile(f) {
   selected = f;
@@ -419,51 +505,106 @@ function fmtPct(v) {
   return Number(v).toFixed(2) + '%';
 }
 
-function startProgress() {
-  const steps = document.querySelectorAll('.stage-step');
-  let i = 0;
-  steps.forEach(s => s.classList.remove('done', 'active'));
-  steps[0].classList.add('active');
-  progressTimer = setInterval(() => {
-    if (i < steps.length - 1) {
-      steps[i].classList.remove('active');
-      steps[i].classList.add('done');
-      i++;
-      steps[i].classList.add('active');
-    }
-  }, 25000);
+function fmtElapsed(sec) {
+  if (sec == null || isNaN(sec)) return '';
+  const s = Math.round(sec);
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return m > 0 ? `${m}m${String(r).padStart(2,'0')}s` : `${r}s`;
 }
 
-function stopProgress(finished) {
-  clearInterval(progressTimer);
-  const steps = document.querySelectorAll('.stage-step');
-  steps.forEach(s => {
-    s.classList.remove('active');
-    if (finished) s.classList.add('done');
-  });
+function renderAgentCards(agents, currentAgent) {
+  const root = document.getElementById('live-agents');
+  root.innerHTML = AGENT_ORDER.map(id => {
+    const a = agents[id];
+    if (!a) return '';
+    const status = a.status || 'pending';
+    const meta = [];
+    if (a.elapsed_sec != null) meta.push(`${a.elapsed_sec}s`);
+    if (a.model) meta.push(a.model.replace('claude-', ''));
+    if (a.usage?.input_tokens != null) meta.push(`tok ${a.usage.input_tokens}/${a.usage.output_tokens || '?'}`);
+    const errBlock = (status === 'error' && a.error)
+      ? `<div class="err-msg">${escape(a.error)}</div>` : '';
+    return `
+      <div class="live-agent ${status}" data-agent="${id}">
+        <div class="icon"></div>
+        <div class="label">${escape(a.name || id)}</div>
+        <div class="meta">${meta.join(' · ')}</div>
+        ${errBlock}
+      </div>`;
+  }).join('');
 }
 
-submit.addEventListener('click', async () => {
-  if (!selected) return;
-  errorEl.textContent = '';
-  resultCard.classList.remove('show');
-  submit.disabled = true;
-  submit.innerHTML = '<span class="spinner"></span>Đang xử lý (180-300s, Opus + thinking + 7 agent)...';
-  stage.classList.add('show');
-  stageText.textContent = '⏳ Pipeline 7 agent đang chạy...';
-  startProgress();
+function renderGlobalError(job) {
+  const el = document.getElementById('global-error');
+  if (job.status !== 'error') { el.style.display = 'none'; return; }
+  const agentName = job.error_agent && job.agents?.[job.error_agent]?.name
+    ? job.agents[job.error_agent].name : (job.error_agent || '?');
+  el.innerHTML = `
+    <b>⚠ Pipeline lỗi tại: ${escape(agentName)}</b>
+    <div>${escape(job.error || 'Không có message')}</div>
+    ${job.error_traceback ? `<details style="margin-top:8px"><summary style="cursor:pointer; font-size:12px; font-weight:600">Stack trace (debug)</summary><div class="err-tb">${escape(job.error_traceback)}</div></details>` : ''}
+  `;
+  el.style.display = 'block';
+}
 
-  try {
-    const fd = new FormData();
-    fd.append('file', selected);
-    const res = await fetch('/api/process', { method: 'POST', body: fd });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: 'Unknown error' }));
-      throw new Error(err.detail || `HTTP ${res.status}`);
+function updateElapsed() {
+  if (!elapsedStart) return;
+  const sec = (Date.now() - elapsedStart) / 1000;
+  document.getElementById('stage-elapsed').textContent = fmtElapsed(sec);
+}
+
+function stopPolling() {
+  if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+  if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+}
+
+async function pollStatus(jobId) {
+  let lastStatus = null;
+  const tick = async () => {
+    try {
+      const r = await fetch(`/api/status/${jobId}`);
+      if (!r.ok) {
+        throw new Error(`status HTTP ${r.status}`);
+      }
+      const job = await r.json();
+
+      // Render live agent cards.
+      if (job.agents) renderAgentCards(job.agents, job.current_agent);
+      document.getElementById('stage-jobid').textContent = ` · job ${jobId}`;
+      document.getElementById('stage-title').textContent = job.status === 'running'
+        ? `⏳ Đang chạy: ${job.agents?.[job.current_agent]?.name || '...'}`
+        : job.status === 'done' ? '✓ Hoàn tất'
+        : job.status === 'error' ? '✗ Lỗi'
+        : '⏳ Đang khởi tạo...';
+
+      if (job.status === 'done') {
+        stopPolling();
+        document.getElementById('stage-elapsed').textContent = fmtElapsed(job.total_elapsed_sec);
+        renderResult(job.result || {});
+        submit.disabled = false;
+        submit.textContent = 'Phân tích & Định giá';
+        return;
+      }
+      if (job.status === 'error') {
+        stopPolling();
+        document.getElementById('stage-elapsed').textContent = fmtElapsed(job.total_elapsed_sec);
+        renderGlobalError(job);
+        submit.disabled = false;
+        submit.textContent = 'Phân tích & Định giá';
+        return;
+      }
+      // still queued/running → poll again.
+      pollTimer = setTimeout(tick, 1500);
+    } catch (e) {
+      // Network blip — retry briefly, then give up.
+      pollTimer = setTimeout(tick, 3000);
     }
-    const data = await res.json();
-    stopProgress(true);
+  };
+  tick();
+}
 
+function renderResult(data) {
     const es = data.executive_summary || {};
     document.getElementById('headline').textContent = es.headline || '';
     const company = data.company || {};
@@ -544,13 +685,63 @@ submit.addEventListener('click', async () => {
     document.getElementById('json-dump').textContent = JSON.stringify(data, null, 2);
 
     resultCard.classList.add('show');
+}
+
+submit.addEventListener('click', async () => {
+  if (!selected) return;
+  errorEl.textContent = '';
+  resultCard.classList.remove('show');
+  document.getElementById('global-error').style.display = 'none';
+  submit.disabled = true;
+  submit.innerHTML = '<span class="spinner"></span>Đang upload...';
+  stage.classList.add('show');
+
+  // Render placeholder agent cards (all pending).
+  const placeholderAgents = {};
+  AGENT_ORDER.forEach((id, i) => {
+    placeholderAgents[id] = {
+      name: ([
+        '1. Trích xuất BCTC',
+        '2. Phân tích ngành',
+        '4. Tỷ số tài chính',
+        '3. Tổng quan DN',
+        '5. Dự phóng 5 năm',
+        '6. Định giá DCF/Multiples',
+        '7. Investment Thesis',
+        '8a. Render PDF',
+        '8b. Xuất Excel',
+        '8c. Debug PDF + trace',
+      ])[i] || id,
+      status: 'pending',
+    };
+  });
+  renderAgentCards(placeholderAgents, null);
+  document.getElementById('stage-title').textContent = '⏳ Đang khởi tạo...';
+  document.getElementById('stage-jobid').textContent = '';
+  document.getElementById('stage-elapsed').textContent = '0s';
+
+  try {
+    const fd = new FormData();
+    fd.append('file', selected);
+    const res = await fetch('/api/process', { method: 'POST', body: fd });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Unknown error' }));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    if (!data.job_id) throw new Error('No job_id returned by /api/process');
+
+    submit.innerHTML = '<span class="spinner"></span>Pipeline đang chạy...';
+
+    // Start UI elapsed timer + poll loop.
+    elapsedStart = Date.now();
+    elapsedTimer = setInterval(updateElapsed, 1000);
+    pollStatus(data.job_id);
   } catch (e) {
-    stopProgress(false);
+    stopPolling();
     errorEl.textContent = '⚠ ' + e.message;
-  } finally {
     submit.disabled = false;
     submit.textContent = 'Phân tích & Định giá';
-    setTimeout(() => stage.classList.remove('show'), 1500);
   }
 });
 </script>

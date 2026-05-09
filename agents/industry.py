@@ -66,16 +66,14 @@ QUY TẮC:
 - Tiếng Việt chuyên nghiệp.
 """
 
-    # User test 2 lần thấy TAM/SAM/SOM khác nhau nhiều → đổi sang DETERMINISTIC mode:
-    # tắt extended thinking + temperature=0 để Claude trả ổn định nhất có thể.
+    # opus-4-7 deprecated `temperature` param entirely. Industry agent dùng default
+    # sampling, KHÔNG bật extended thinking để giảm variance ở TAM/SAM/SOM.
     # Đánh đổi: thinking giúp reasoning sâu hơn, nhưng cho TAM/SAM (essentially
-    # estimation từ training data) thì consistency > nuance reasoning.
-    # Anthropic API chỉ cho phép temperature=0 khi thinking TẮT.
+    # estimation từ training data) consistency > nuance reasoning.
     t0 = time.time()
     message = _client.messages.create(
         model=_MODEL,
         max_tokens=8000,
-        temperature=0,
         messages=[{"role": "user", "content": user_prompt}],
     )
     elapsed = time.time() - t0
