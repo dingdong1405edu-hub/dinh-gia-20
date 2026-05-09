@@ -72,6 +72,7 @@ def export_excel(payload: dict, output_path: str) -> dict:
 
     # Mỗi sheet bị xử lý qua try/except riêng — schema drift sẽ gắn ghi chú vào sheet
     # thay vì sập cả file Excel.
+    _safe(_sheet_methodology, wb)
     _safe(_sheet_overview, wb, financials, business, valuation, thesis)
     _safe(_sheet_income_statement, wb, financials)
     _safe(_sheet_balance_sheet, wb, financials)
@@ -322,95 +323,134 @@ def _sheet_cash_flow(wb, financials):
 
 
 def _sheet_ratios(wb, ratios_payload):
+    """Tỷ số tài chính + cột công thức để kế toán audit dễ.
+
+    LƯU Ý: analyzer.py phát ratios theo cấu trúc nested:
+      ratios.current = {liquidity: {current_ratio: {value, rating}, ...},
+                        leverage: {...}, profitability: {...}, efficiency: {...}}
+    Cần flatten về {ratio_name: value} trước khi tra cứu.
+    """
     ws = wb.create_sheet("Tỷ số")
     ratios = ratios_payload.get("ratios") or {}
-    cur = ratios.get("current") or {}
-    prev = ratios.get("previous") or ratios.get("prior") or {}
+    cur_flat = _flatten_ratios(ratios.get("current"))
+    prev_flat = _flatten_ratios(ratios.get("previous") or ratios.get("prior"))
     growth = ratios_payload.get("growth") or {}
 
+    # (key, label_VI, kind, formula_text). kind: "pct_frac" = fraction → display as %.
     categories = [
         ("Thanh khoản", [
-            ("current_ratio", "Hệ số TT hiện hành", "ratio"),
-            ("quick_ratio", "Hệ số TT nhanh", "ratio"),
-            ("cash_ratio", "Hệ số TT tiền mặt", "ratio"),
+            ("current_ratio", "Hệ số TT hiện hành", "ratio",
+             "= current_assets_total / current_liabilities_total"),
+            ("quick_ratio", "Hệ số TT nhanh", "ratio",
+             "= (current_assets_total − inventory) / current_liabilities_total"),
+            ("cash_ratio", "Hệ số TT tiền mặt", "ratio",
+             "= (cash + short_term_investments) / current_liabilities_total"),
         ]),
         ("Đòn bẩy / Cơ cấu vốn", [
-            ("debt_ratio", "Hệ số nợ / TS", "pct_frac"),
-            ("debt_to_equity", "Nợ / VCSH", "ratio"),
-            ("equity_multiplier", "Hệ số nhân VCSH", "ratio"),
-            ("interest_coverage", "Khả năng trả lãi vay", "ratio"),
-            ("debt_to_ebitda", "Nợ / EBITDA", "ratio"),
+            ("debt_ratio", "Hệ số nợ / TS", "pct_frac",
+             "= total_liabilities / total_assets"),
+            ("debt_to_equity", "Nợ / VCSH", "ratio",
+             "= total_liabilities / total_equity"),
+            ("equity_multiplier", "Hệ số nhân VCSH", "ratio",
+             "= total_assets / total_equity"),
+            ("interest_coverage", "Khả năng trả lãi vay", "ratio",
+             "= operating_profit / interest_expense"),
+            ("debt_to_ebitda", "Nợ / EBITDA", "ratio",
+             "= total_liabilities / EBITDA*  (* EBIT proxy nếu thiếu D&A)"),
         ]),
         ("Khả năng sinh lời", [
-            ("gross_margin", "Biên LN gộp", "pct_frac"),
-            ("operating_margin", "Biên LN HĐKD", "pct_frac"),
-            ("ebitda_margin", "Biên EBITDA", "pct_frac"),
-            ("net_margin", "Biên LN ròng", "pct_frac"),
-            ("roa", "ROA", "pct_frac"),
-            ("roe", "ROE", "pct_frac"),
+            ("gross_margin", "Biên LN gộp", "pct_frac",
+             "= gross_profit / net_revenue"),
+            ("operating_margin", "Biên LN HĐKD", "pct_frac",
+             "= operating_profit / net_revenue"),
+            ("ebitda_margin", "Biên EBITDA", "pct_frac",
+             "= EBITDA* / net_revenue  (* EBIT proxy nếu thiếu D&A)"),
+            ("net_margin", "Biên LN ròng", "pct_frac",
+             "= net_profit_after_tax / net_revenue"),
+            ("roa", "ROA", "pct_frac",
+             "= net_profit_after_tax / total_assets"),
+            ("roe", "ROE", "pct_frac",
+             "= net_profit_after_tax / total_equity"),
         ]),
         ("Hiệu quả hoạt động", [
-            ("asset_turnover", "Vòng quay tổng TS", "ratio"),
-            ("inventory_turnover", "Vòng quay HTK", "ratio"),
-            ("receivables_turnover", "Vòng quay phải thu", "ratio"),
+            ("asset_turnover", "Vòng quay tổng TS", "ratio",
+             "= net_revenue / total_assets"),
+            ("inventory_turnover", "Vòng quay HTK", "ratio",
+             "= cogs / inventory"),
+            ("receivables_turnover", "Vòng quay phải thu", "ratio",
+             "= net_revenue / short_term_receivables"),
         ]),
     ]
 
-    for col, h in enumerate(["Tỷ số", "Kỳ này", "Kỳ trước", "Δ"], 1):
+    headers = ["Tỷ số", "Kỳ này", "Kỳ trước", "Δ", "Công thức"]
+    for col, h in enumerate(headers, 1):
         c = ws.cell(1, col, h)
         c.font = HEADER_FONT
         c.fill = HEADER_FILL
-        c.alignment = Alignment(horizontal="center" if col > 1 else "left")
+        c.alignment = Alignment(horizontal="center" if col > 1 and col < 5 else "left")
 
     row = 2
     for cat_name, items in categories:
         c = ws.cell(row, 1, cat_name)
         c.font = SECTION_FONT; c.fill = SECTION_FILL
-        for col in range(2, 5):
+        for col in range(2, 6):
             ws.cell(row, col).fill = SECTION_FILL
         row += 1
-        for key, label, kind in items:
-            cv = cur.get(key)
-            pv = prev.get(key)
+        for key, label, kind, formula in items:
+            cv = cur_flat.get(key)
+            pv = prev_flat.get(key)
             ws.cell(row, 1, label).font = BODY_FONT
-            # pct_frac: ratio in fraction form (0.08 = 8%); ratio: number as-is.
             fmt = "0.00%" if kind == "pct_frac" else "0.00"
             for col, v in enumerate([cv, pv], 2):
-                if v is not None:
-                    try:
-                        cc = ws.cell(row, col, float(v))
-                        cc.number_format = fmt
-                        cc.font = BODY_FONT
-                    except (TypeError, ValueError):
-                        pass
+                if isinstance(v, (int, float)):
+                    cc = ws.cell(row, col, float(v))
+                    cc.number_format = fmt
+                    cc.font = BODY_FONT
             if isinstance(cv, (int, float)) and isinstance(pv, (int, float)) and pv:
                 ws.cell(row, 4, (cv - pv) / abs(pv)).number_format = "+0.0%;-0.0%;0.0%"
+            f_cell = ws.cell(row, 5, formula)
+            f_cell.font = Font(name="Consolas", size=9, color=_hex(COLORS["primary"]))
+            f_cell.alignment = Alignment(wrap_text=True, vertical="center")
             row += 1
         row += 1
 
-    # Growth block (analyzer.py output: revenue_yoy, gross_profit_yoy, ebit_yoy,
-    # net_income_yoy, total_assets_yoy, total_equity_yoy — fractions, not %).
+    # Growth block: analyzer._compute_growth output, fields đã ở dạng fraction.
     if growth:
         c = ws.cell(row, 1, "Tăng trưởng YoY")
         c.font = SECTION_FONT; c.fill = SECTION_FILL
-        for col in range(2, 5):
+        for col in range(2, 6):
             ws.cell(row, col).fill = SECTION_FILL
         row += 1
-        for k, label in [
-            ("revenue_yoy", "Tăng trưởng doanh thu"),
-            ("gross_profit_yoy", "Tăng trưởng LN gộp"),
-            ("ebit_yoy", "Tăng trưởng EBIT"),
-            ("net_income_yoy", "Tăng trưởng LNST"),
-            ("total_assets_yoy", "Tăng trưởng tổng tài sản"),
-            ("total_equity_yoy", "Tăng trưởng VCSH"),
-        ]:
+        growth_items = [
+            ("revenue_yoy", "Tăng trưởng doanh thu",
+             "= (revenue_current − revenue_previous) / |revenue_previous|"),
+            ("gross_profit_yoy", "Tăng trưởng LN gộp",
+             "= (gross_profit_current − gross_profit_previous) / |…|"),
+            ("ebit_yoy", "Tăng trưởng EBIT",
+             "= (operating_profit_current − operating_profit_previous) / |…|"),
+            ("net_income_yoy", "Tăng trưởng LNST",
+             "= (net_profit_after_tax_current − …_previous) / |…_previous|"),
+            ("total_assets_yoy", "Tăng trưởng tổng tài sản",
+             "= (total_assets_current − total_assets_previous) / |…|"),
+            ("total_equity_yoy", "Tăng trưởng VCSH",
+             "= (total_equity_current − total_equity_previous) / |…|"),
+        ]
+        for k, label, formula in growth_items:
             v = growth.get(k)
             ws.cell(row, 1, label).font = BODY_FONT
             if isinstance(v, (int, float)):
                 cc = ws.cell(row, 2, float(v))
                 cc.number_format = "+0.0%;-0.0%;0.0%"
                 cc.font = BODY_FONT
+            f_cell = ws.cell(row, 5, formula)
+            f_cell.font = Font(name="Consolas", size=9, color=_hex(COLORS["primary"]))
+            f_cell.alignment = Alignment(wrap_text=True, vertical="center")
             row += 1
+        row += 1
+
+    # Footer pointer to source file.
+    ws.cell(row + 1, 1, "📁 Sửa công thức tại: agents/analyzer.py · _compute_period_ratios (line 84) · _compute_growth (line 200)").font = MUTED_FONT
+    ws.merge_cells(start_row=row + 1, start_column=1, end_row=row + 1, end_column=5)
 
     ws.column_dimensions["A"].width = 36
     ws.column_dimensions["B"].width = 14
@@ -547,26 +587,41 @@ def _sheet_valuation(wb, valuation, unit):
         ws.cell(row, 1, "(Không có)").font = MUTED_FONT
         row += 1
 
-    # DCF detail.
+    # DCF detail — tổng quan.
     row += 2
-    _write_section_title(ws, row, 1, "DCF (FCFF) — chi tiết", span=2)
-    row += 2
+    _write_section_title(ws, row, 1, "DCF (FCFF) — Tổng quan + Công thức", span=3)
+    row += 1
+    ws.cell(row, 1, "📁 Sửa công thức tại: agents/valuator.py · _dcf_valuation (line 157)").font = MUTED_FONT
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
+    row += 1
+    formula_font = Font(name="Consolas", size=9, color=_hex(COLORS["primary"]))
     dcf_rows = [
-        ("WACC (%)", dcf.get("wacc_pct"), "0.00\"%\""),
-        ("Terminal growth (%)", dcf.get("terminal_growth_pct"), "0.00\"%\""),
-        ("PV của FCFF (5Y)", dcf.get("pv_explicit_fcff"), "#,##0"),
-        ("Terminal value", dcf.get("terminal_value"), "#,##0"),
-        ("PV(Terminal value)", dcf.get("pv_terminal"), "#,##0"),
-        ("Enterprise value", dcf.get("enterprise_value"), "#,##0"),
-        ("Trừ nợ", dcf.get("debt_subtracted"), "#,##0"),
-        ("Equity value (DCF)", dcf.get("equity_value"), "#,##0"),
+        ("WACC (%)", dcf.get("wacc_pct"), "0.00\"%\"",
+         "AI đề xuất (valuator._claude_assumptions)"),
+        ("Terminal growth g (%)", dcf.get("terminal_growth_pct"), "0.00\"%\"",
+         "AI đề xuất, thường ~ inflation (3-4%)"),
+        ("Σ PV(FCFF) — 5 năm explicit", dcf.get("pv_explicit_fcff"), "#,##0",
+         "= Σ FCFF_t / (1+WACC)^t,  t=1..5"),
+        ("Terminal Value (TV)", dcf.get("terminal_value"), "#,##0",
+         "= FCFF_5 × (1+g) / (WACC − g)"),
+        ("PV(Terminal Value)", dcf.get("pv_terminal"), "#,##0",
+         "= TV / (1+WACC)^5"),
+        ("Enterprise Value (EV)", dcf.get("enterprise_value"), "#,##0",
+         "= Σ PV(FCFF) + PV(TV)"),
+        ("Trừ Total Debt", dcf.get("debt_subtracted"), "#,##0",
+         "Mặc định = total_liabilities. Sửa tại valuator.py line 28."),
+        ("Equity Value (DCF)  ⭐", dcf.get("equity_value"), "#,##0",
+         "= EV − Total_Debt"),
     ]
-    for label, val, fmt in dcf_rows:
+    for label, val, fmt, formula in dcf_rows:
         ws.cell(row, 1, label).font = LABEL_FONT
         if isinstance(val, (int, float)):
             cc = ws.cell(row, 2, float(val))
             cc.number_format = fmt
             cc.font = BODY_FONT
+        f_cell = ws.cell(row, 3, formula)
+        f_cell.font = formula_font
+        f_cell.alignment = Alignment(wrap_text=True, vertical="center")
         row += 1
     if dcf.get("note"):
         ws.cell(row, 1, "Ghi chú").font = LABEL_FONT
@@ -575,24 +630,64 @@ def _sheet_valuation(wb, valuation, unit):
         c.font = MUTED_FONT
         row += 1
 
-    # PV breakdown table.
+    # PV breakdown table — bước tính từng năm.
     pv_breakdown = dcf.get("pv_breakdown") or []
     if pv_breakdown:
         row += 1
-        _write_section_title(ws, row, 1, "DCF — PV breakdown từng năm", span=4)
-        row += 2
-        for col, h in enumerate(["Năm", "FCFF", "Discount factor", "PV"], 1):
-            c = ws.cell(row, col, h); c.font = LABEL_FONT
+        _write_section_title(ws, row, 1, "DCF — Bước tính PV từng năm (audit-friendly)", span=5)
+        row += 1
+        ws.cell(row, 1,
+                "Mỗi dòng: lấy FCFF của năm × (1/(1+WACC)^t) = PV. Cộng dồn cột PV ra Σ PV(FCFF) ở trên.").font = MUTED_FONT
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=5)
+        row += 1
+        wacc_pct = dcf.get("wacc_pct")
+        wacc_decimal_str = f"{wacc_pct/100:.4f}" if isinstance(wacc_pct, (int, float)) else "WACC"
+        for col, h in enumerate(
+                ["Năm (t)", "FCFF", "Discount factor (1/(1+WACC)^t)", "PV = FCFF / (1+WACC)^t",
+                 "Diễn giải bước tính"], 1):
+            c = ws.cell(row, col, h)
+            c.font = LABEL_FONT
+            c.fill = TOTAL_FILL
         row += 1
         for it in pv_breakdown:
-            ws.cell(row, 1, it.get("year")).font = BODY_FONT
-            for col, k, fmt in [(2, "fcff", "#,##0"), (3, "discount_factor", "0.0000"), (4, "pv", "#,##0")]:
-                v = it.get(k)
+            t = it.get("year")
+            fcff = it.get("fcff")
+            df = it.get("discount_factor")
+            pv = it.get("pv")
+            ws.cell(row, 1, t).font = BODY_FONT
+            for col, v, fmt in [(2, fcff, "#,##0"), (3, df, "0.0000"), (4, pv, "#,##0")]:
                 if isinstance(v, (int, float)):
                     cc = ws.cell(row, col, float(v))
                     cc.number_format = fmt
                     cc.font = BODY_FONT
+            # Bước tính bằng số cụ thể.
+            if isinstance(fcff, (int, float)) and isinstance(df, (int, float)) and isinstance(t, int):
+                explain = (f"= {int(fcff):,} ÷ (1+{wacc_decimal_str})^{t} "
+                           f"= {int(fcff):,} × {df:.4f}")
+            else:
+                explain = ""
+            f_cell = ws.cell(row, 5, explain)
+            f_cell.font = formula_font
+            f_cell.alignment = Alignment(wrap_text=True, vertical="center")
             row += 1
+
+        # Sum row.
+        ws.cell(row, 1, "Σ").font = LABEL_FONT
+        ws.cell(row, 1).fill = TOTAL_FILL
+        if isinstance(dcf.get("pv_explicit_fcff"), (int, float)):
+            cc = ws.cell(row, 4, float(dcf["pv_explicit_fcff"]))
+            cc.number_format = "#,##0"
+            cc.font = LABEL_FONT
+            cc.fill = TOTAL_FILL
+        ws.cell(row, 5, "Σ PV(FCFF) các năm = số ở dòng 'Σ PV(FCFF) — 5 năm explicit' phía trên").font = MUTED_FONT
+        row += 1
+
+    # Sensitivity pointer.
+    row += 1
+    ws.cell(row, 1, "📁 Xem sheet 'Sensitivity' để biết equity value thay đổi thế nào "
+                    "khi WACC/g sai khác base case.").font = MUTED_FONT
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=4)
+    row += 1
 
     # Multiples block.
     row += 2
@@ -650,10 +745,11 @@ def _sheet_valuation(wb, valuation, unit):
 
     if unit:
         ws.cell(row + 2, 1, f"(Đơn vị giá trị: {unit})").font = MUTED_FONT
-    ws.column_dimensions["A"].width = 40
+    ws.column_dimensions["A"].width = 38
     ws.column_dimensions["B"].width = 22
-    ws.column_dimensions["C"].width = 18
+    ws.column_dimensions["C"].width = 50
     ws.column_dimensions["D"].width = 22
+    ws.column_dimensions["E"].width = 60
 
 
 def _sheet_sensitivity(wb, valuation):
@@ -940,3 +1036,233 @@ def _summarize_item(item):
                 return str(item[key])
         return ", ".join(f"{k}={v}" for k, v in item.items() if v is not None)[:80]
     return str(item)
+
+
+def _flatten_ratios(rated):
+    """Convert analyzer's nested {category: {name: {value, rating}}} → flat {name: value}.
+
+    analyzer.py emits ratios under 4 categories (liquidity / leverage / profitability /
+    efficiency). This sheet displays them by category but accesses values flatly.
+    """
+    flat: dict = {}
+    if not isinstance(rated, dict):
+        return flat
+    for cat, items in rated.items():
+        if not isinstance(items, dict):
+            continue
+        for name, payload in items.items():
+            if isinstance(payload, dict):
+                flat[name] = payload.get("value")
+            else:
+                flat[name] = payload
+    return flat
+
+
+# ---------- Methodology sheet ----------
+# (Calculation, Type, Formula, Source file:function — line gần đúng).
+# Sửa file/line ở đây nếu code Python được di chuyển sau này.
+_METHODOLOGY_ROWS = [
+    ("AGENT 1 — TRÍCH XUẤT BCTC", None, None, None),
+    ("Đọc PDF/ảnh BCTC → JSON", "AI",
+     "Multimodal Claude Opus 4.7 + extended thinking. Không có phép tính.",
+     "agents/extractor.py · _PROMPT (line 22)"),
+
+    ("AGENT 2 — PHÂN TÍCH NGÀNH", None, None, None),
+    ("Industry name, TAM/SAM/SOM, đối thủ", "AI",
+     "Phán đoán dựa trên kiến thức ngành. Không có công thức.",
+     "agents/industry.py · user_prompt"),
+
+    ("AGENT 3 — TỔNG QUAN DN", None, None, None),
+    ("Business model, value chain, vị thế", "AI",
+     "Suy luận từ BCTC + ngành.",
+     "agents/business_profile.py · user_prompt"),
+
+    ("AGENT 4 — TỶ SỐ TÀI CHÍNH", None, None, None),
+    ("current_ratio", "PYTHON",
+     "= current_assets_total / current_liabilities_total",
+     "agents/analyzer.py · _compute_period_ratios (line 125)"),
+    ("quick_ratio", "PYTHON",
+     "= (current_assets_total − inventory) / current_liabilities_total",
+     "agents/analyzer.py · _compute_period_ratios (line 126)"),
+    ("cash_ratio", "PYTHON",
+     "= (cash_and_equivalents + short_term_investments) / current_liabilities_total",
+     "agents/analyzer.py · _compute_period_ratios (line 127)"),
+    ("debt_ratio", "PYTHON",
+     "= total_liabilities / total_assets",
+     "agents/analyzer.py · _compute_period_ratios (line 130)"),
+    ("debt_to_equity", "PYTHON",
+     "= total_liabilities / total_equity",
+     "agents/analyzer.py · _compute_period_ratios (line 131)"),
+    ("equity_multiplier", "PYTHON",
+     "= total_assets / total_equity",
+     "agents/analyzer.py · _compute_period_ratios (line 132)"),
+    ("interest_coverage", "PYTHON",
+     "= operating_profit / interest_expense  (EBIT/Interest)",
+     "agents/analyzer.py · _compute_period_ratios (line 133)"),
+    ("debt_to_ebitda", "PYTHON",
+     "= total_liabilities / EBITDA   (EBIT proxy nếu BCTC thiếu D&A — sửa biến `ebitda_proxy`)",
+     "agents/analyzer.py · _compute_period_ratios (line 113, 134)"),
+    ("gross_margin", "PYTHON",
+     "= gross_profit / net_revenue",
+     "agents/analyzer.py · _compute_period_ratios (line 137)"),
+    ("operating_margin", "PYTHON",
+     "= operating_profit / net_revenue",
+     "agents/analyzer.py · _compute_period_ratios (line 138)"),
+    ("ebitda_margin", "PYTHON",
+     "= EBITDA / net_revenue   (EBIT proxy nếu thiếu D&A)",
+     "agents/analyzer.py · _compute_period_ratios (line 139)"),
+    ("net_margin", "PYTHON",
+     "= net_profit_after_tax / net_revenue",
+     "agents/analyzer.py · _compute_period_ratios (line 140)"),
+    ("roa", "PYTHON",
+     "= net_profit_after_tax / total_assets   (cuối kỳ, không trung bình)",
+     "agents/analyzer.py · _compute_period_ratios (line 141)"),
+    ("roe", "PYTHON",
+     "= net_profit_after_tax / total_equity   (cuối kỳ)",
+     "agents/analyzer.py · _compute_period_ratios (line 142)"),
+    ("asset_turnover", "PYTHON",
+     "= net_revenue / total_assets",
+     "agents/analyzer.py · _compute_period_ratios (line 145)"),
+    ("inventory_turnover", "PYTHON",
+     "= cogs / inventory",
+     "agents/analyzer.py · _compute_period_ratios (line 146)"),
+    ("receivables_turnover", "PYTHON",
+     "= net_revenue / short_term_receivables",
+     "agents/analyzer.py · _compute_period_ratios (line 147)"),
+    ("Tăng trưởng YoY (mọi chỉ tiêu)", "PYTHON",
+     "= (current − previous) / |previous|",
+     "agents/analyzer.py · _yoy (line 188), _compute_growth (line 200)"),
+    ("Ngưỡng đánh giá tốt/cảnh báo/kém", "PYTHON",
+     "Bảng ngưỡng cho từng tỷ số (cao tốt / thấp tốt). Sửa để đổi rating.",
+     "agents/analyzer.py · _THRESHOLDS (line 43)"),
+
+    ("AGENT 5 — DỰ PHÓNG 5 NĂM", None, None, None),
+    ("revenue Y_t", "AI có ràng buộc",
+     "= revenue_{t-1} × (1 + revenue_growth_pct[t])",
+     "agents/projector.py · prompt line 62"),
+    ("gross_profit Y_t", "AI có ràng buộc",
+     "= revenue × gross_margin_pct[t]",
+     "agents/projector.py · prompt line 64"),
+    ("EBIT Y_t", "AI có ràng buộc",
+     "= gross_profit − operating_expense  (operating_expense = revenue × OPEX%)",
+     "agents/projector.py · prompt line 65"),
+    ("EBITDA Y_t", "AI có ràng buộc",
+     "= EBIT + Depreciation",
+     "agents/projector.py · prompt line 92"),
+    ("net_income Y_t", "AI có ràng buộc",
+     "= (EBIT − interest_expense) × (1 − tax_rate_pct/100)",
+     "agents/projector.py · prompt line 87-88"),
+    ("FCFF Y_t   ⭐ quan trọng cho DCF", "AI có ràng buộc",
+     "= EBIT × (1 − tax%) + D&A − CAPEX − ΔWC",
+     "agents/projector.py · prompt line 110 (ràng buộc bắt buộc)"),
+    ("Tăng trưởng giảm dần (S-curve)", "AI có ràng buộc",
+     "Y1 cao nhất, Y5 thấp nhất, hội tụ về CAGR ngành",
+     "agents/projector.py · prompt line 108"),
+
+    ("AGENT 6 — ĐỊNH GIÁ", None, None, None),
+    ("WACC, terminal_growth, multiples", "AI",
+     "Claude đề xuất giá trị + rationale. Sửa prompt để force range khác (vd 12-18%).",
+     "agents/valuator.py · _claude_assumptions (line 68)"),
+    ("DCF: PV(FCFF_t)   ⭐", "PYTHON",
+     "= FCFF_t / (1 + WACC)^t      với t = 1..5",
+     "agents/valuator.py · _dcf_valuation (line 174-178)"),
+    ("DCF: Terminal Value", "PYTHON",
+     "= FCFF_5 × (1 + g) / (WACC − g)     [Gordon Growth Model]",
+     "agents/valuator.py · _dcf_valuation (line 180-182)"),
+    ("DCF: PV(Terminal Value)", "PYTHON",
+     "= TV / (1 + WACC)^5",
+     "agents/valuator.py · _dcf_valuation (line 183)"),
+    ("DCF: Enterprise Value", "PYTHON",
+     "= Σ PV(FCFF_t) + PV(TV)",
+     "agents/valuator.py · _dcf_valuation (line 188)"),
+    ("DCF: Equity Value", "PYTHON",
+     "= Enterprise_Value − Total_Debt",
+     "agents/valuator.py · _dcf_valuation (line 189)"),
+    ("Total_Debt định nghĩa", "PYTHON",
+     "= total_liabilities (toàn bộ nợ phải trả). Đổi sang chỉ short_term_debt + long_term_debt nếu muốn 'nợ có lãi vay' thuần.",
+     "agents/valuator.py · line 28"),
+    ("Multiples — EV/EBITDA", "PYTHON",
+     "Equity = (EBITDA_Y1 × ev_ebitda_multiple) − Total_Debt",
+     "agents/valuator.py · _multiples_valuation (line 208-216)"),
+    ("Multiples — P/E", "PYTHON",
+     "Equity = Net_Income_current × pe_multiple",
+     "agents/valuator.py · _multiples_valuation (line 219-224)"),
+    ("Multiples — P/B", "PYTHON",
+     "Equity = Total_Equity_book × pb_multiple",
+     "agents/valuator.py · _multiples_valuation (line 227-232)"),
+    ("Fair Value low/mid/high", "PYTHON",
+     "low = min(equity_values), high = max, mid = mean (TRUNG BÌNH CỘNG, không trọng số)",
+     "agents/valuator.py · _build_summary (line 286-289)"),
+    ("Chiết khấu thiểu số", "PYTHON",
+     "fair_value_after_md = fair_value_mid × (1 − minority_discount_pct/100)",
+     "agents/valuator.py · _build_summary (line 291-293)"),
+    ("Sensitivity matrix (5×5)", "PYTHON",
+     "Re-run DCF với WACC ± 1%, ±2% và g ± 1%, ±2%. Step size sửa được.",
+     "agents/valuator.py · _sensitivity (line 240-261)"),
+
+    ("AGENT 7 — INVESTMENT THESIS", None, None, None),
+    ("Headline, drivers, catalysts, risks", "AI",
+     "Claude tổng hợp output A1-A6 thành memo. Không có phép tính.",
+     "agents/thesis_writer.py · user_prompt"),
+
+    ("AGENT 8 — RENDER", None, None, None),
+    ("PDF (matplotlib) + Excel (openpyxl)", "PYTHON (vẽ)",
+     "Không tạo số mới — chỉ vẽ output. Style tokens tách riêng.",
+     "agents/renderer.py · agents/excel_writer.py · style: agents/report_style.py"),
+]
+
+
+def _sheet_methodology(wb):
+    """First sheet: bảng tra cứu mọi phép tính trong báo cáo."""
+    ws = wb.create_sheet("Phương pháp tính")
+    ws.cell(1, 1, "BẢNG TRA CỨU PHƯƠNG PHÁP TÍNH").font = Font(
+        name="Calibri", size=14, bold=True, color=_hex(COLORS["primary"]))
+    ws.cell(2, 1, "Mỗi dòng = 1 phép tính. Cột 'File nguồn' chỉ ra chỗ sửa nếu cần.").font = MUTED_FONT
+    ws.cell(3, 1, "PYTHON = công thức cố định, kế toán có thể audit.   "
+                  "AI = phán đoán bởi Claude — đọc rationale trong trace.json.").font = MUTED_FONT
+
+    headers = ["Phép tính / Chỉ tiêu", "Loại", "Công thức / Diễn giải", "File nguồn (Sửa tại đây)"]
+    for col, h in enumerate(headers, 1):
+        c = ws.cell(5, col, h)
+        c.font = HEADER_FONT
+        c.fill = HEADER_FILL
+        c.alignment = Alignment(horizontal="left", vertical="center")
+
+    row = 6
+    formula_font = Font(name="Consolas", size=9, color=_hex(COLORS["primary"]))
+    source_font = Font(name="Consolas", size=9, color=_hex(COLORS["accent"]))
+    for entry in _METHODOLOGY_ROWS:
+        name, kind, formula, source = entry
+        if kind is None:
+            # Section header.
+            c = ws.cell(row, 1, name)
+            c.font = SECTION_FONT
+            c.fill = SECTION_FILL
+            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=4)
+            for k in range(2, 5):
+                ws.cell(row, k).fill = SECTION_FILL
+            row += 1
+            continue
+        ws.cell(row, 1, name).font = LABEL_FONT
+        kind_cell = ws.cell(row, 2, kind)
+        kind_cell.font = LABEL_FONT
+        if kind == "PYTHON":
+            kind_cell.fill = GOOD_FILL
+        elif kind.startswith("AI"):
+            kind_cell.fill = PatternFill("solid", fgColor=_hex(COLORS.get("primary_band") or "DBEAFE"))
+        else:
+            kind_cell.fill = TOTAL_FILL
+        f_cell = ws.cell(row, 3, formula or "")
+        f_cell.font = formula_font
+        f_cell.alignment = Alignment(wrap_text=True, vertical="top")
+        s_cell = ws.cell(row, 4, source or "")
+        s_cell.font = source_font
+        s_cell.alignment = Alignment(wrap_text=True, vertical="top")
+        ws.row_dimensions[row].height = 28
+        row += 1
+
+    ws.column_dimensions["A"].width = 38
+    ws.column_dimensions["B"].width = 16
+    ws.column_dimensions["C"].width = 70
+    ws.column_dimensions["D"].width = 56
+    ws.freeze_panes = "A6"

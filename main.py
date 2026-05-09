@@ -47,6 +47,12 @@ def agents_page() -> str:
     return (BASE_DIR / "static" / "agents.html").read_text(encoding="utf-8")
 
 
+@app.get("/methodology", response_class=HTMLResponse)
+@app.get("/methodology.html", response_class=HTMLResponse)
+def methodology_page() -> str:
+    return (BASE_DIR / "static" / "methodology.html").read_text(encoding="utf-8")
+
+
 @app.get("/health")
 def health() -> dict:
     return {"ok": True, "has_api_key": bool(os.environ.get("ANTHROPIC_API_KEY"))}
