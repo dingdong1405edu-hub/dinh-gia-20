@@ -250,14 +250,24 @@ def _page_cover(financials, valuation, thesis):
             linewidth=1.2, transform=ax.transAxes)
 
     company = (_get(financials, "company", "name") or "(Không xác định)").strip()
-    # Wrap company name to ≤2 lines if very long.
-    company_lines = textwrap.wrap(company, width=32) or [company]
-    company_lines = company_lines[:2]
-    base_y = 0.755 if len(company_lines) > 1 else 0.78
+    # Pick fontsize then wrap width based on it — đảm bảo mỗi line fit trang.
+    # Cover content area ~ 0.84 wide. Title 32pt: ~0.032 per char → ~26 chars/line max.
+    # Title 28pt: ~0.028 per char → ~30 chars/line max.
+    if len(company) <= 26:
+        company_lines = [company]
+        title_fs = S["cover_title"]
+    else:
+        company_lines = textwrap.wrap(company, width=30,
+                                      break_long_words=False) or [company]
+        company_lines = company_lines[:2]
+        title_fs = S["cover_title"] - 6  # giảm size khi 2 dòng
+    base_y = 0.78 if len(company_lines) == 1 else 0.755
+    line_gap = 0.05 if title_fs >= 28 else 0.045
     for i, line in enumerate(company_lines):
-        ax.text(0.5, base_y - i * 0.045, line,
-                ha="center", va="center",
-                fontsize=S["cover_title"] if len(company_lines) == 1 else S["cover_title"] - 4,
+        # Final fit guard — nếu line vẫn quá dài thì truncate.
+        line_fitted = _fit_text(line, 0.84, title_fs)
+        ax.text(0.5, base_y - i * line_gap, line_fitted,
+                ha="center", va="center", fontsize=title_fs,
                 fontweight=WEIGHT_HEADER, color=C["primary_dark"],
                 transform=ax.transAxes)
 
@@ -267,7 +277,9 @@ def _page_cover(financials, valuation, thesis):
     report_type = _get(financials, "company", "report_type") or ""
     subtitle_parts = [p for p in [period, industry_hint, report_type] if p]
     if subtitle_parts:
-        ax.text(0.5, 0.685, "  ·  ".join(subtitle_parts).upper(),
+        subtitle = "  ·  ".join(subtitle_parts).upper()
+        ax.text(0.5, 0.685,
+                _fit_text(subtitle, 0.84, S["cover_subtitle"]),
                 ha="center", va="center", fontsize=S["cover_subtitle"],
                 color=C["text_muted"], style="italic",
                 transform=ax.transAxes)
@@ -293,18 +305,29 @@ def _page_cover(financials, valuation, thesis):
             transform=ax.transAxes)
 
     if fv_mid is not None:
-        ax.text(0.5, 0.51, _fmt_money(fv_mid),
-                ha="center", va="center", fontsize=S["cover_value_amount"],
+        # Fair value 38pt — auto-shrink fontsize tới khi fit khung 0.78 wide.
+        fv_text = _fmt_money(fv_mid)
+        fv_fs = S["cover_value_amount"]
+        while fv_fs > 18 and _est_text_width(fv_text, fv_fs) > 0.78:
+            fv_fs -= 2
+        # Nếu vẫn quá to ở 18pt thì đổi sang compact format.
+        if _est_text_width(fv_text, fv_fs) > 0.78:
+            fv_text = _fmt_money_compact(fv_mid, 0.78, fv_fs)
+        ax.text(0.5, 0.51, fv_text,
+                ha="center", va="center", fontsize=fv_fs,
                 fontweight=WEIGHT_HEADER, color=C["primary_dark"],
                 transform=ax.transAxes)
         if unit:
-            ax.text(0.5, 0.46, unit.upper(),
+            ax.text(0.5, 0.46,
+                    _fit_text(unit.upper(), 0.78, S["cover_value_unit"]),
                     ha="center", va="center", fontsize=S["cover_value_unit"],
                     color=C["text_muted"], fontweight=WEIGHT_HEADER,
                     transform=ax.transAxes)
         if fv_low is not None and fv_high is not None:
+            range_text = (f"Range: {_fmt_money_compact(fv_low, 0.30, 10)}  —  "
+                          f"{_fmt_money_compact(fv_high, 0.30, 10)}")
             ax.text(0.5, 0.435,
-                    f"Range: {_fmt_money(fv_low)}  —  {_fmt_money(fv_high)}",
+                    _fit_text(range_text, 0.78, 10),
                     ha="center", va="center", fontsize=10, color=C["text"],
                     transform=ax.transAxes)
     else:
@@ -324,19 +347,25 @@ def _page_cover(financials, valuation, thesis):
     strip_h = 0.06
     ax.add_patch(Rectangle((0.10, strip_y), 0.80, strip_h,
                            color=C["surface_subtle"], transform=ax.transAxes))
+    col_w = 0.80 / 3
     for i, (label, value) in enumerate(metrics):
-        col_x = 0.10 + (i + 0.5) * 0.80 / 3
-        ax.text(col_x, strip_y + strip_h - 0.018, label,
+        col_x = 0.10 + (i + 0.5) * col_w
+        # Label fit trong cột (~0.25 wide với padding).
+        ax.text(col_x, strip_y + strip_h - 0.018,
+                _fit_text(label, col_w - 0.02, S["cover_metric_label"]),
                 ha="center", va="center", fontsize=S["cover_metric_label"],
                 fontweight=WEIGHT_HEADER, color=C["text_muted"],
                 transform=ax.transAxes)
-        ax.text(col_x, strip_y + 0.018,
-                _fmt_money(value) if value is not None else "—",
-                ha="center", va="center", fontsize=S["cover_metric_value"],
+        # Value: dùng compact format để không bao giờ overflow cột.
+        val_fs = S["cover_metric_value"]
+        val_text = (_fmt_money_compact(value, col_w - 0.02, val_fs)
+                    if value is not None else "—")
+        ax.text(col_x, strip_y + 0.018, val_text,
+                ha="center", va="center", fontsize=val_fs,
                 fontweight=WEIGHT_HEADER, color=C["primary_dark"],
                 transform=ax.transAxes)
         if i < len(metrics) - 1:
-            sep_x = 0.10 + (i + 1) * 0.80 / 3
+            sep_x = 0.10 + (i + 1) * col_w
             ax.plot([sep_x, sep_x], [strip_y + 0.008, strip_y + strip_h - 0.008],
                     color=C["border_strong"], linewidth=0.5, transform=ax.transAxes)
 
@@ -1596,20 +1625,23 @@ def _new_page(title: str):
                               color=C["border_strong"], linewidth=0.5))
 
     # =========== SECTION TITLE BAR (inside content area) ===========
-    # Big gold left bar + uppercase section title.
+    # Gold + navy double-block bên trái + tiêu đề UPPERCASE (truncated nếu cần).
     ax.add_patch(Rectangle((0, 0.953), 0.008, 0.030,
                            facecolor=C["ribbon_gold"], edgecolor="none",
                            transform=ax.transAxes))
     ax.add_patch(Rectangle((0.008, 0.953), 0.008, 0.030,
                            facecolor=C["primary_dark"], edgecolor="none",
                            transform=ax.transAxes))
-    ax.text(0.024, 0.968, title.upper(),
+    # Title fit vào content area (sau accent block 0.024, đến 0.98 chừa lề phải).
+    title_max_w = 0.95
+    ax.text(0.024, 0.968,
+            _fit_text(title.upper(), title_max_w, S["page_title"]),
             fontsize=S["page_title"], fontweight=WEIGHT_HEADER,
             color=C["primary_dark"], va="center")
-    # Long primary rule + short gold accent.
+    # Rule chính + gold accent — TẤT CẢ cùng x range (0 → 1) cho thẳng.
     ax.plot([0, 1], [0.945, 0.945], color=C["primary_dark"], linewidth=1.0,
             transform=ax.transAxes)
-    ax.plot([0, 0.12], [0.943, 0.943], color=C["ribbon_gold"], linewidth=1.5,
+    ax.plot([0, 0.12], [0.945, 0.945], color=C["ribbon_gold"], linewidth=1.6,
             transform=ax.transAxes)
 
     # =========== FOOTER ===========
@@ -1659,18 +1691,19 @@ def _draw_bullet(ax, text, x, y, fontsize, color, max_chars, max_lines, line_hei
 
 
 def _draw_simple_table(ax, rows, x, y, col_widths, line_height, highlight_last=False):
-    """Two-column key/value table with subtle zebra striping for readability.
+    """K/V table with zebra striping. Mỗi ô được FIT vào col_width (truncate nếu cần).
 
-    Even rows: white. Odd rows: very light gray. Last row (if highlight_last):
-    primary band background + bold + thin rule above.
+    Numeric-looking cells right-align. Padding 0.006 mỗi bên trong ô để tránh
+    sát mép. Last row (totals): bold + primary band + rule above.
     """
     total_w = sum(col_widths)
+    PAD = 0.006  # padding mỗi bên trong ô — quan trọng để text không sát viền
     for idx, row in enumerate(rows):
         if y < 0.04:
             break
         is_last = highlight_last and idx == len(rows) - 1
 
-        # Zebra striping background — very subtle.
+        # Zebra striping background.
         if not is_last and idx % 2 == 1:
             ax.add_patch(Rectangle((x, y - line_height + 0.004),
                                    total_w, line_height,
@@ -1685,14 +1718,16 @@ def _draw_simple_table(ax, rows, x, y, col_widths, line_height, highlight_last=F
         cur_x = x
         for i, cell in enumerate(row):
             w = col_widths[i] if i < len(col_widths) else 0.20
+            inner_w = max(0.02, w - 2 * PAD)
             text = "" if cell is None else str(cell)
             color = C["primary_dark"] if is_last else C["text"]
             fw = WEIGHT_HEADER if (is_last or i == 0) else WEIGHT_BODY
             fs = 10.5 if is_last else 10
-            # Right-align numeric-looking last column for cleaner number columns.
             ha = "right" if (i == len(row) - 1 and i > 0 and _looks_numeric(text)) else "left"
-            tx = cur_x + (w - 0.005) if ha == "right" else cur_x + 0.003
-            ax.text(tx, y, text, fontsize=fs, color=color,
+            # Truncate text to fit inside cell — prevents collision với cell kế bên.
+            display = _fit_text(text, inner_w, fs)
+            tx = cur_x + (w - PAD) if ha == "right" else cur_x + PAD
+            ax.text(tx, y, display, fontsize=fs, color=color,
                     fontweight=fw, va="top", ha=ha, zorder=2)
             cur_x += w
         if is_last:
@@ -1707,7 +1742,6 @@ def _looks_numeric(text: str) -> bool:
     if not text or text == "—":
         return False
     s = text.strip()
-    # Stripping common formatting: commas, dots, %, signs, currency-like spaces.
     stripped = s.replace(".", "").replace(",", "").replace("%", "").replace(" ", "")
     stripped = stripped.lstrip("+-").rstrip("x").rstrip("X")
     return stripped.isdigit() if stripped else False
@@ -1727,37 +1761,65 @@ def _draw_kv_grid(ax, items, x, y, col_widths, cols=2, line_height=0.024):
 
 
 def _draw_table(ax, rows, x, y, width, line_height, show_prev, cur_label, prev_label):
-    label_x = x + 0.005
-    cur_x = x + width * 0.62
-    prev_x = x + width * 0.82
-    chg_x = x + width * 0.99
+    """Financial-statement table với column geometry CỐ ĐỊNH (label + cur + prev + Δ%).
 
-    ax.text(label_x, y, "Khoản mục", fontsize=9, fontweight="bold",
-            color=C["text_muted"], va="top")
-    ax.text(cur_x, y, cur_label, fontsize=9, fontweight="bold",
-            color=C["text_muted"], va="top", ha="right")
+    Mỗi cell được fit/compact để không bao giờ overflow. Số rất to tự động chuyển
+    sang format compact "1,23 tỷ". Label dài tự cắt với ellipsis.
+
+    Geometry (assuming width=1.0):
+      - Label column:    x      → 0.42       (42% — đủ chỗ tên khoản mục)
+      - Current period:  0.42   → 0.62       (20% — số kỳ này, right-align ở 0.62)
+      - Previous period: 0.62   → 0.82       (20% — số kỳ trước, right-align ở 0.82)
+      - Δ %:             0.82   → 0.99       (17% — phần trăm chênh, right-align ở 0.99)
+    """
+    PAD = 0.006
+    # Column right edges (right-aligned text ENDS at these x).
+    label_x_start = x + PAD
+    label_max_w   = width * 0.41 - PAD                       # đủ chỗ cho label, dừng trước cur col
+    cur_right     = x + width * 0.62
+    cur_max_w     = width * 0.20 - PAD * 2                    # số tự fit trong 20%
+    prev_right    = x + width * 0.82
+    prev_max_w    = width * 0.20 - PAD * 2
+    chg_right     = x + width * 0.99
+    chg_max_w     = width * 0.17 - PAD * 2
+
+    # Header row.
+    ax.text(label_x_start, y,
+            _fit_text("Khoản mục", label_max_w, 9),
+            fontsize=9, fontweight="bold", color=C["text_muted"], va="top")
+    ax.text(cur_right, y,
+            _fit_text(cur_label, cur_max_w, 9),
+            fontsize=9, fontweight="bold", color=C["text_muted"], va="top", ha="right")
     if show_prev:
-        ax.text(prev_x, y, prev_label, fontsize=9, fontweight="bold",
-                color=C["text_muted"], va="top", ha="right")
-        ax.text(chg_x, y, "Δ%", fontsize=9, fontweight="bold",
+        ax.text(prev_right, y,
+                _fit_text(prev_label, prev_max_w, 9),
+                fontsize=9, fontweight="bold", color=C["text_muted"], va="top", ha="right")
+        ax.text(chg_right, y, "Δ%", fontsize=9, fontweight="bold",
                 color=C["text_muted"], va="top", ha="right")
     y -= line_height
-    ax.plot([x, x + width], [y + 0.003, y + 0.003], color="#d1d5db", linewidth=0.7)
+    ax.plot([x, x + width], [y + 0.003, y + 0.003],
+            color=C["border_strong"], linewidth=0.7)
     y -= 0.005
 
     for label, level, cv, pv in rows:
         if y < 0.04:
             break
+        # Section sub-headers (TÀI SẢN / NGUỒN VỐN / Tài sản ngắn hạn …).
         if level == "header":
-            ax.text(label_x, y, label, fontsize=11, fontweight="bold",
+            ax.text(label_x_start, y,
+                    _fit_text(label, width - 2 * PAD, 11),
+                    fontsize=11, fontweight="bold",
                     color=C["text_strong"], va="top")
             y -= line_height
             continue
         if level == "subheader":
-            ax.text(label_x + 0.005, y, label, fontsize=10, fontweight="bold",
+            ax.text(label_x_start + 0.005, y,
+                    _fit_text(label, width - 2 * PAD, 10),
+                    fontsize=10, fontweight="bold",
                     color=C["text"], va="top", style="italic")
             y -= line_height
             continue
+        # Leaf rows.
         if level == "grand":
             font_w = "bold"; color = C["text_strong"]; fs = 10
         elif level == "total":
@@ -1765,19 +1827,29 @@ def _draw_table(ax, rows, x, y, width, line_height, show_prev, cur_label, prev_l
         else:
             font_w = "normal"; color = C["text"]; fs = 9
             label = "  " + label
-        ax.text(label_x, y, label, fontsize=fs, fontweight=font_w,
-                color=color, va="top")
-        ax.text(cur_x, y, _fmt_money(cv), fontsize=fs,
-                fontweight=font_w, color=color, va="top", ha="right")
+
+        # Label — fit to label_max_w.
+        ax.text(label_x_start, y,
+                _fit_text(label, label_max_w, fs),
+                fontsize=fs, fontweight=font_w, color=color, va="top")
+        # Current period — auto-compact format if number too wide for cell.
+        ax.text(cur_right, y,
+                _fmt_money_compact(cv, cur_max_w, fs),
+                fontsize=fs, fontweight=font_w, color=color,
+                va="top", ha="right")
         if show_prev:
-            ax.text(prev_x, y, _fmt_money(pv), fontsize=fs,
-                    color=C["text_muted"], va="top", ha="right")
+            ax.text(prev_right, y,
+                    _fmt_money_compact(pv, prev_max_w, fs),
+                    fontsize=fs, color=C["text_muted"],
+                    va="top", ha="right")
             chg_pct = _percent_change(cv, pv)
             chg_color = C["text"]
             if chg_pct is not None:
                 chg_color = C["good"] if chg_pct > 0 else (C["poor"] if chg_pct < 0 else C["text_muted"])
-            ax.text(chg_x, y, _fmt_pct_signed_pct(chg_pct),
-                    fontsize=fs - 0.5, color=chg_color, va="top", ha="right")
+            ax.text(chg_right, y,
+                    _fit_text(_fmt_pct_signed_pct(chg_pct), chg_max_w, fs - 0.5),
+                    fontsize=fs - 0.5, color=chg_color,
+                    va="top", ha="right")
         if level == "grand":
             ax.plot([x, x + width], [y - 0.002, y - 0.002],
                     color=C["text_dim"], linewidth=0.5)
@@ -1798,6 +1870,69 @@ def _fmt_money(value):
     sign = "-" if v < 0 else ""
     s = f"{int(abs(v)):,}".replace(",", ".")
     return sign + s
+
+
+# ---------- Text-fitting helpers (to prevent text overflow / overlap) ----------
+# Heuristic: char width in axes-normalized coords [0..1] for an axes occupying
+# ~85% of A4 width. At fontsize=10pt, avg char ≈ 5pt = 5/72 inch ≈ 0.069 inch.
+# Axes width = 0.85 × 8.27 inch ≈ 7.03 inch → 1 char ≈ 0.0099 of axes width.
+_CHAR_WIDTH_PER_PT = 0.00099  # axes-normalized width per char per pt fontsize
+
+
+def _est_text_width(text: str, fontsize: float) -> float:
+    """Estimate axes-normalized width of `text` at `fontsize` (in pt)."""
+    if not text:
+        return 0.0
+    return len(str(text)) * fontsize * _CHAR_WIDTH_PER_PT
+
+
+def _fit_text(text, max_width: float, fontsize: float, ellipsis: str = "…") -> str:
+    """Truncate text with ellipsis to fit `max_width` (axes-normalized)."""
+    s = "" if text is None else str(text)
+    if not s or max_width <= 0:
+        return ""
+    if _est_text_width(s, fontsize) <= max_width:
+        return s
+    char_w = fontsize * _CHAR_WIDTH_PER_PT
+    if char_w <= 0:
+        return s
+    n_max = max(1, int((max_width / char_w) - len(ellipsis)))
+    if n_max >= len(s):
+        return s
+    return s[:n_max].rstrip() + ellipsis
+
+
+def _fmt_money_compact(value, max_width: float, fontsize: float) -> str:
+    """Format money — auto-scales to tỷ / triệu / nghìn nếu format đầy đủ
+    quá rộng so với max_width."""
+    full = _fmt_money(value)
+    if value is None or full == "—" or full == "0":
+        return full
+    if _est_text_width(full, fontsize) <= max_width:
+        return full
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return _fit_text(full, max_width, fontsize)
+    abs_v = abs(v)
+    sign = "-" if v < 0 else ""
+    # Try compact formats from biggest to smallest divisor.
+    for divisor, suffix in [
+        (1e12, " ng.tỷ"),  # nghìn tỷ
+        (1e9,  " tỷ"),
+        (1e6,  " tr"),
+        (1e3,  " k"),
+    ]:
+        if abs_v >= divisor:
+            scaled = abs_v / divisor
+            # Pick precision that fits.
+            for fmt in ["{:,.2f}", "{:,.1f}", "{:,.0f}"]:
+                candidate = f"{sign}{fmt.format(scaled)}{suffix}".replace(",", ".")
+                if _est_text_width(candidate, fontsize) <= max_width:
+                    return candidate
+            break
+    # Last resort: truncate the full string.
+    return _fit_text(full, max_width, fontsize)
 
 
 def _fmt_billion(value):
