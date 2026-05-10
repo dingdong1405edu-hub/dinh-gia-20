@@ -24,6 +24,7 @@ from agents.report_style import (
     PRIMARY_FONT,
     FONT_FALLBACKS,
     WEIGHT_HEADER,
+    WEIGHT_BODY,
     grade_color as _grade_color_fn,
     rating_color as _rating_color_fn,
 )
@@ -139,6 +140,7 @@ def render_valuation_report(payload: dict, output_path: str) -> dict:
     """Render báo cáo đầy đủ thành 1 file PDF."""
     t0 = time.time()
     bundle = _bundle(payload)
+    _reset_report_ctx(bundle.get("financials"))
     pages = 0
     with PdfPages(output_path) as pdf:
         for _kind, _slug, _title, builder in SECTIONS:
@@ -165,6 +167,7 @@ def render_all(payload: dict, output_dir: str, full_pdf_path: str) -> dict:
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     bundle = _bundle(payload)
+    _reset_report_ctx(bundle.get("financials"))
 
     section_files = []
     total_pages = 0
@@ -214,75 +217,165 @@ def render_report(trace: dict, output_path: str) -> dict:
 # ============================ Cover ============================
 
 def _page_cover(financials, valuation, thesis):
+    """IB-style hero cover: navy band, big title, fair value, metric strip, ribbon."""
     fig = plt.figure(figsize=A4)
     ax = fig.add_axes([0, 0, 1, 1])
     ax.axis("off"); ax.set_xlim(0, 1); ax.set_ylim(0, 1)
 
-    ax.add_patch(Rectangle((0, 0.96), 1, 0.04, color=C["primary"], transform=ax.transAxes))
-    ax.add_patch(Rectangle((0, 0), 1, 0.03, color=C["primary"], transform=ax.transAxes))
+    # ============ Top dark navy band (10% height) ============
+    ax.add_patch(Rectangle((0, 0.93), 1, 0.07, color=C["primary_dark"],
+                           transform=ax.transAxes, zorder=1))
+    # Thin gold ribbon strip just below — IB-style elegance.
+    ax.add_patch(Rectangle((0, 0.928), 1, 0.003, color=C["ribbon_gold"],
+                           transform=ax.transAxes, zorder=2))
 
-    ax.text(0.5, 0.88, "BÁO CÁO ĐỊNH GIÁ DOANH NGHIỆP",
-            ha="center", va="top", fontsize=22, fontweight="bold", color=C["primary"])
-    ax.text(0.5, 0.83, "SME Valuation Report",
-            ha="center", va="top", fontsize=13, color=C["text_muted"], style="italic")
-    ax.plot([0.18, 0.82], [0.81, 0.81], color=C["primary"], linewidth=2.5)
+    # Eyebrow text on band: "BÁO CÁO ĐỊNH GIÁ" + report id (date) right-aligned.
+    ax.text(0.07, 0.965, "B Á O   C Á O   Đ Ị N H   G I Á   D O A N H   N G H I Ệ P",
+            ha="left", va="center", fontsize=S["cover_eyebrow"],
+            color="#ffffff", fontweight=WEIGHT_HEADER,
+            transform=ax.transAxes, zorder=3)
+    ax.text(0.93, 0.965,
+            datetime.now().strftime("%d / %m / %Y").upper(),
+            ha="right", va="center", fontsize=S["cover_eyebrow"],
+            color=C["ribbon_gold_light"], fontweight=WEIGHT_HEADER,
+            transform=ax.transAxes, zorder=3, family="monospace")
+
+    # ============ Hero — company name (big bold) ============
+    ax.text(0.5, 0.84, "VALUATION REPORT",
+            ha="center", va="center", fontsize=11,
+            color=C["text_muted"], fontweight=WEIGHT_HEADER,
+            transform=ax.transAxes)
+    # Thin gold accent under report-type label.
+    ax.plot([0.42, 0.58], [0.825, 0.825], color=C["ribbon_gold"],
+            linewidth=1.2, transform=ax.transAxes)
 
     company = (_get(financials, "company", "name") or "(Không xác định)").strip()
-    ax.text(0.5, 0.74, company, ha="center", va="top",
-            fontsize=20, fontweight="bold", color=C["primary"])
+    # Wrap company name to ≤2 lines if very long.
+    company_lines = textwrap.wrap(company, width=32) or [company]
+    company_lines = company_lines[:2]
+    base_y = 0.755 if len(company_lines) > 1 else 0.78
+    for i, line in enumerate(company_lines):
+        ax.text(0.5, base_y - i * 0.045, line,
+                ha="center", va="center",
+                fontsize=S["cover_title"] if len(company_lines) == 1 else S["cover_title"] - 4,
+                fontweight=WEIGHT_HEADER, color=C["primary_dark"],
+                transform=ax.transAxes)
 
+    # Period · industry · report_type subtitle line.
     period = _get(financials, "period", "current", "label") or ""
-    if period:
-        ax.text(0.5, 0.685, f"Kỳ phân tích: {period}", ha="center", va="top",
-                fontsize=13, color=C["text"])
+    industry_hint = _get(financials, "company", "industry") or ""
+    report_type = _get(financials, "company", "report_type") or ""
+    subtitle_parts = [p for p in [period, industry_hint, report_type] if p]
+    if subtitle_parts:
+        ax.text(0.5, 0.685, "  ·  ".join(subtitle_parts).upper(),
+                ha="center", va="center", fontsize=S["cover_subtitle"],
+                color=C["text_muted"], style="italic",
+                transform=ax.transAxes)
 
-    industry_name = ""
-    rt = _get(financials, "company", "report_type")
-    if rt:
-        industry_name = rt
-    if industry_name:
-        ax.text(0.5, 0.65, industry_name, ha="center", va="top",
-                fontsize=11, color=C["text_muted"], style="italic")
-
+    # ============ Fair value hero block ============
     summary = (valuation.get("summary") or {})
     fv_mid = summary.get("fair_value_mid")
     fv_low = summary.get("fair_value_low")
     fv_high = summary.get("fair_value_high")
     unit = financials.get("unit") or ""
 
-    box_y = 0.42
-    ax.add_patch(FancyBboxPatch((0.10, box_y - 0.02), 0.80, 0.18,
-                                 boxstyle="round,pad=0.005,rounding_size=0.012",
-                                 linewidth=1.5, edgecolor=C["primary"],
-                                 facecolor=C["primary_light"], transform=ax.transAxes))
-    ax.text(0.5, box_y + 0.13, "Giá trị hợp lý ước tính (Equity Value)",
-            ha="center", va="center", fontsize=12, fontweight="bold", color=C["primary"])
+    # Outer frame — subtle border, no fill (clean / formal look).
+    ax.add_patch(Rectangle((0.10, 0.42), 0.80, 0.18,
+                           linewidth=0.8, edgecolor=C["border_strong"],
+                           facecolor="none", transform=ax.transAxes))
+    # Inner left vertical accent bar (gold).
+    ax.add_patch(Rectangle((0.10, 0.42), 0.006, 0.18,
+                           color=C["ribbon_gold"], transform=ax.transAxes))
+
+    ax.text(0.5, 0.575, "EQUITY VALUE — FAIR ESTIMATE",
+            ha="center", va="center", fontsize=S["cover_value_label"],
+            fontweight=WEIGHT_HEADER, color=C["text_muted"],
+            transform=ax.transAxes)
+
     if fv_mid is not None:
-        ax.text(0.5, box_y + 0.08, _fmt_money(fv_mid),
-                ha="center", va="center", fontsize=24, fontweight="bold", color=C["primary"])
-        ax.text(0.5, box_y + 0.04, f"({unit})",
-                ha="center", va="center", fontsize=10, color=C["text_muted"])
+        ax.text(0.5, 0.51, _fmt_money(fv_mid),
+                ha="center", va="center", fontsize=S["cover_value_amount"],
+                fontweight=WEIGHT_HEADER, color=C["primary_dark"],
+                transform=ax.transAxes)
+        if unit:
+            ax.text(0.5, 0.46, unit.upper(),
+                    ha="center", va="center", fontsize=S["cover_value_unit"],
+                    color=C["text_muted"], fontweight=WEIGHT_HEADER,
+                    transform=ax.transAxes)
         if fv_low is not None and fv_high is not None:
-            ax.text(0.5, box_y, f"Khoảng: {_fmt_money(fv_low)} — {_fmt_money(fv_high)}",
-                    ha="center", va="center", fontsize=11, color=C["text"])
+            ax.text(0.5, 0.435,
+                    f"Range: {_fmt_money(fv_low)}  —  {_fmt_money(fv_high)}",
+                    ha="center", va="center", fontsize=10, color=C["text"],
+                    transform=ax.transAxes)
     else:
-        ax.text(0.5, box_y + 0.06, "(Không đủ dữ liệu định giá)",
-                ha="center", va="center", fontsize=14, color=C["text_dim"], style="italic")
+        ax.text(0.5, 0.50, "(Không đủ dữ liệu định giá)",
+                ha="center", va="center", fontsize=14, color=C["text_dim"],
+                style="italic", transform=ax.transAxes)
 
+    # ============ Metric strip (3 cols: Doanh thu / LNST / Tổng TS) ============
+    is_cur = (financials.get("income_statement") or {}).get("current") or {}
+    bs_cur = (financials.get("balance_sheet") or {}).get("current") or {}
+    metrics = [
+        ("DOANH THU", is_cur.get("net_revenue") or is_cur.get("revenue")),
+        ("LỢI NHUẬN SAU THUẾ", is_cur.get("net_profit_after_tax")),
+        ("TỔNG TÀI SẢN", _get(bs_cur, "assets", "total_assets")),
+    ]
+    strip_y = 0.34
+    strip_h = 0.06
+    ax.add_patch(Rectangle((0.10, strip_y), 0.80, strip_h,
+                           color=C["surface_subtle"], transform=ax.transAxes))
+    for i, (label, value) in enumerate(metrics):
+        col_x = 0.10 + (i + 0.5) * 0.80 / 3
+        ax.text(col_x, strip_y + strip_h - 0.018, label,
+                ha="center", va="center", fontsize=S["cover_metric_label"],
+                fontweight=WEIGHT_HEADER, color=C["text_muted"],
+                transform=ax.transAxes)
+        ax.text(col_x, strip_y + 0.018,
+                _fmt_money(value) if value is not None else "—",
+                ha="center", va="center", fontsize=S["cover_metric_value"],
+                fontweight=WEIGHT_HEADER, color=C["primary_dark"],
+                transform=ax.transAxes)
+        if i < len(metrics) - 1:
+            sep_x = 0.10 + (i + 1) * 0.80 / 3
+            ax.plot([sep_x, sep_x], [strip_y + 0.008, strip_y + strip_h - 0.008],
+                    color=C["border_strong"], linewidth=0.5, transform=ax.transAxes)
+
+    # ============ Recommendation pill / executive headline ============
     headline = _get(thesis, "executive_summary", "headline") or ""
-    if headline:
-        _draw_block(ax, headline, x=0.10, y=0.34, max_chars=72,
-                    max_lines=4, fontsize=11, color=C["text"], line_height=0.022)
-
     rec = _get(thesis, "executive_summary", "recommendation") or ""
-    if rec:
-        ax.text(0.10, 0.18, "KHUYẾN NGHỊ", fontsize=10,
-                fontweight="bold", color=C["primary"], va="top")
-        _draw_block(ax, rec, x=0.10, y=0.16, max_chars=80, max_lines=4,
-                    fontsize=11, color=C["text_strong"], line_height=0.022)
 
-    ax.text(0.5, 0.07, datetime.now().strftime("%d/%m/%Y · Generated by 3-agent pipeline"),
-            ha="center", va="bottom", fontsize=9, color=C["text_dim"], style="italic")
+    if headline:
+        # Center, max 3 lines, italic.
+        _draw_block(ax, headline, x=0.10, y=0.27, max_chars=92, max_lines=3,
+                    fontsize=10.5, color=C["text"], line_height=0.020)
+
+    if rec:
+        # "KHUYẾN NGHỊ" pill + body text.
+        ax.add_patch(Rectangle((0.10, 0.165), 0.10, 0.025,
+                               color=C["primary_dark"], transform=ax.transAxes))
+        ax.text(0.15, 0.1775, "KHUYẾN NGHỊ", ha="center", va="center",
+                fontsize=8, fontweight=WEIGHT_HEADER, color="#ffffff",
+                transform=ax.transAxes)
+        _draw_block(ax, rec, x=0.21, y=0.187, max_chars=78, max_lines=4,
+                    fontsize=10.5, color=C["text_strong"], line_height=0.020)
+
+    # ============ Bottom band + footer ============
+    ax.add_patch(Rectangle((0, 0), 1, 0.06, color=C["primary_dark"],
+                           transform=ax.transAxes, zorder=1))
+    ax.add_patch(Rectangle((0, 0.06), 1, 0.003, color=C["ribbon_gold"],
+                           transform=ax.transAxes, zorder=2))
+
+    ax.text(0.07, 0.030,
+            "PREPARED BY  ·  8-AGENT VALUATION PIPELINE",
+            ha="left", va="center", fontsize=S["cover_footer"],
+            color="#ffffff", fontweight=WEIGHT_HEADER,
+            transform=ax.transAxes, zorder=3)
+    ax.text(0.93, 0.030,
+            "CLAUDE OPUS 4.7  ·  EXTENDED THINKING",
+            ha="right", va="center", fontsize=S["cover_footer"],
+            color=C["ribbon_gold_light"], fontweight=WEIGHT_HEADER,
+            transform=ax.transAxes, zorder=3, family="monospace")
+
     return fig
 
 
@@ -1444,26 +1537,96 @@ def _section_appendix(valuation, projection, industry):
 
 # ============================ Helpers — page templates ============================
 
+# Module-level state for running header / page counter.
+# Reset by render_valuation_report() / render_all() / render_report() at start.
+_REPORT_CTX: dict = {
+    "company": "",          # tên DN — show ở running header
+    "period": "",           # kỳ — show ở running header
+    "page_no": 0,           # trang content hiện tại (cover không tính)
+}
+
+
+def _reset_report_ctx(financials: dict | None = None):
+    """Gọi ở đầu mỗi render để reset page counter + lấy company info."""
+    _REPORT_CTX["page_no"] = 0
+    if financials:
+        company = (_get(financials, "company", "name") or "").strip()
+        period = _get(financials, "period", "current", "label") or ""
+        _REPORT_CTX["company"] = company[:50]  # truncate dài quá
+        _REPORT_CTX["period"] = period
+    else:
+        _REPORT_CTX["company"] = ""
+        _REPORT_CTX["period"] = ""
+
+
 def _new_page(title: str):
+    """IB-style content page: thin running header + content area + footer with page #.
+
+    Running header (small caps): company name (left) · section title (center) · page # (right)
+    Footer: gold accent + report identifier left + page count right
+    """
+    _REPORT_CTX["page_no"] += 1
+    page_no = _REPORT_CTX["page_no"]
+    company = _REPORT_CTX["company"] or "—"
+    period = _REPORT_CTX["period"]
+
     fig = plt.figure(figsize=A4)
-    ml = L["margin_left"]; mr = L["margin_right"]
-    mt = L["margin_top"]; mb = L["margin_bottom"]
+    # Slightly more generous content margins for a refined feel.
+    ml, mr = 0.075, 0.075
+    mt, mb = 0.07, 0.06
     ax = fig.add_axes([ml, mb, 1 - ml - mr, 1 - mt - mb])
     ax.axis("off"); ax.set_xlim(0, 1); ax.set_ylim(0, 1)
-    # accent square + title
-    ax.add_patch(Rectangle((0, 0.965), L["header_accent_block"], 0.025,
-                           facecolor=C["primary"], edgecolor="none",
+
+    # =========== RUNNING HEADER (top of content area, above page) ===========
+    # Three-segment line at top — company | section | page no.
+    # Drawn in figure coordinates so they align outside the content axes too.
+    fig.text(0.075, 0.967, company.upper(),
+             fontsize=S["running_header"], color=C["text_muted"],
+             fontweight=WEIGHT_HEADER, ha="left", va="center")
+    if period:
+        fig.text(0.5, 0.967, period.upper(),
+                 fontsize=S["running_header"], color=C["text_muted"],
+                 ha="center", va="center", style="italic")
+    fig.text(0.925, 0.967, f"PAGE {page_no:02d}",
+             fontsize=S["running_header"], color=C["text_muted"],
+             fontweight=WEIGHT_HEADER, ha="right", va="center",
+             family="monospace")
+    # Hairline rule under running header.
+    fig.add_artist(plt.Line2D([0.075, 0.925], [0.957, 0.957],
+                              color=C["border_strong"], linewidth=0.5))
+
+    # =========== SECTION TITLE BAR (inside content area) ===========
+    # Big gold left bar + uppercase section title.
+    ax.add_patch(Rectangle((0, 0.953), 0.008, 0.030,
+                           facecolor=C["ribbon_gold"], edgecolor="none",
                            transform=ax.transAxes))
-    ax.text(L["header_accent_block"] + 0.010, 0.978, title,
+    ax.add_patch(Rectangle((0.008, 0.953), 0.008, 0.030,
+                           facecolor=C["primary_dark"], edgecolor="none",
+                           transform=ax.transAxes))
+    ax.text(0.024, 0.968, title.upper(),
             fontsize=S["page_title"], fontweight=WEIGHT_HEADER,
-            color=C["primary"], va="center")
-    ax.plot([0, 1], [0.955, 0.955], color=C["primary"], linewidth=L["header_rule_width"])
-    ax.plot([0, 0.18], [0.952, 0.952], color=C["accent"], linewidth=L["header_rule_width"])
-    # footer
-    ax.text(1, 0.005, "Báo cáo định giá doanh nghiệp",
-            fontsize=S["footnote"], color=C["text_dim"], ha="right", va="bottom",
-            style="italic", transform=ax.transAxes)
-    ax.plot([0, 1], [0.022, 0.022], color=C["border"], linewidth=L["footer_rule_width"])
+            color=C["primary_dark"], va="center")
+    # Long primary rule + short gold accent.
+    ax.plot([0, 1], [0.945, 0.945], color=C["primary_dark"], linewidth=1.0,
+            transform=ax.transAxes)
+    ax.plot([0, 0.12], [0.943, 0.943], color=C["ribbon_gold"], linewidth=1.5,
+            transform=ax.transAxes)
+
+    # =========== FOOTER ===========
+    fig.text(0.075, 0.030, "BÁO CÁO ĐỊNH GIÁ DOANH NGHIỆP",
+             fontsize=S["footnote"], color=C["text_muted"],
+             fontweight=WEIGHT_HEADER, ha="left", va="center")
+    fig.text(0.5, 0.030, datetime.now().strftime("%d/%m/%Y"),
+             fontsize=S["footnote"], color=C["text_dim"],
+             ha="center", va="center", style="italic")
+    fig.text(0.925, 0.030, f"— {page_no} —",
+             fontsize=S["footnote"], color=C["text_muted"],
+             ha="right", va="center", family="monospace")
+    fig.add_artist(plt.Line2D([0.075, 0.925], [0.044, 0.044],
+                              color=C["border_strong"], linewidth=0.5))
+    fig.add_artist(plt.Line2D([0.075, 0.16], [0.046, 0.046],
+                              color=C["ribbon_gold"], linewidth=1.2))
+
     return fig, ax
 
 
@@ -1496,26 +1659,58 @@ def _draw_bullet(ax, text, x, y, fontsize, color, max_chars, max_lines, line_hei
 
 
 def _draw_simple_table(ax, rows, x, y, col_widths, line_height, highlight_last=False):
+    """Two-column key/value table with subtle zebra striping for readability.
+
+    Even rows: white. Odd rows: very light gray. Last row (if highlight_last):
+    primary band background + bold + thin rule above.
+    """
+    total_w = sum(col_widths)
     for idx, row in enumerate(rows):
         if y < 0.04:
             break
         is_last = highlight_last and idx == len(rows) - 1
+
+        # Zebra striping background — very subtle.
+        if not is_last and idx % 2 == 1:
+            ax.add_patch(Rectangle((x, y - line_height + 0.004),
+                                   total_w, line_height,
+                                   facecolor=C["surface_alt"], edgecolor="none",
+                                   transform=ax.transAxes, zorder=0))
+        elif is_last:
+            ax.add_patch(Rectangle((x, y - line_height + 0.004),
+                                   total_w, line_height,
+                                   facecolor=C["primary_band"], edgecolor="none",
+                                   transform=ax.transAxes, zorder=0))
+
         cur_x = x
         for i, cell in enumerate(row):
             w = col_widths[i] if i < len(col_widths) else 0.20
             text = "" if cell is None else str(cell)
-            color = C["primary"] if is_last else C["text"]
-            fw = "bold" if (is_last or i == 0) else "normal"
-            fs = 11 if is_last else 10
-            ha = "left"
-            ax.text(cur_x, y, text, fontsize=fs, color=color,
-                    fontweight=fw, va="top", ha=ha)
+            color = C["primary_dark"] if is_last else C["text"]
+            fw = WEIGHT_HEADER if (is_last or i == 0) else WEIGHT_BODY
+            fs = 10.5 if is_last else 10
+            # Right-align numeric-looking last column for cleaner number columns.
+            ha = "right" if (i == len(row) - 1 and i > 0 and _looks_numeric(text)) else "left"
+            tx = cur_x + (w - 0.005) if ha == "right" else cur_x + 0.003
+            ax.text(tx, y, text, fontsize=fs, color=color,
+                    fontweight=fw, va="top", ha=ha, zorder=2)
             cur_x += w
         if is_last:
-            ax.plot([x, x + sum(col_widths)], [y - 0.003, y - 0.003],
-                    color=C["primary"], linewidth=1)
+            ax.plot([x, x + total_w], [y + 0.002, y + 0.002],
+                    color=C["primary_dark"], linewidth=1, zorder=2)
         y -= line_height
     return y
+
+
+def _looks_numeric(text: str) -> bool:
+    """True nếu chuỗi nhìn như con số / tỷ lệ — để right-align trong table."""
+    if not text or text == "—":
+        return False
+    s = text.strip()
+    # Stripping common formatting: commas, dots, %, signs, currency-like spaces.
+    stripped = s.replace(".", "").replace(",", "").replace("%", "").replace(" ", "")
+    stripped = stripped.lstrip("+-").rstrip("x").rstrip("X")
+    return stripped.isdigit() if stripped else False
 
 
 def _draw_kv_grid(ax, items, x, y, col_widths, cols=2, line_height=0.024):

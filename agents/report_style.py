@@ -15,15 +15,17 @@ Hai loại token:
 
 # ===================== COLORS =====================
 COLORS = {
-    # Tông chính — tiêu đề, accent header, fair value box.
-    "primary": "#1e3a8a",          # navy
-    "primary_dark": "#1e40af",
-    "primary_light": "#eff6ff",     # bg callout box
-    "primary_band": "#dbeafe",
+    # Tông chính — IB-style navy với đậm hơn cho cover.
+    "primary": "#0f2444",           # deep navy (đậm hơn để cover trang trọng)
+    "primary_mid": "#1e3a8a",       # navy gốc
+    "primary_dark": "#0a1a33",      # navy rất đậm cho band
+    "primary_light": "#eff6ff",     # bg callout box nhạt
+    "primary_band": "#dbeafe",      # light band
 
-    # Accent — đường gạch chân nhỏ, nhấn nhẹ.
-    "accent": "#dc2626",            # red
-    "accent_light": "#fee2e2",
+    # Accent — đỏ rượu cho fine-line + ribbon.
+    "accent": "#a3174a",            # burgundy thay vì đỏ tươi
+    "accent_bright": "#dc2626",     # red tươi (giữ cho status)
+    "accent_light": "#fce7f3",
 
     # Trạng thái (dùng cho rủi ro, catalyst, rating).
     "good": "#10b981",              # green
@@ -44,8 +46,11 @@ COLORS = {
     # Surface (nền, viền, chia mục).
     "border": "#e5e7eb",
     "border_strong": "#d1d5db",
-    "surface_alt": "#f9fafb",       # row alt bg
+    "surface_alt": "#f8fafc",       # row alt bg (xám rất nhạt cho zebra striping)
     "surface_card": "#ffffff",
+    "surface_subtle": "#f1f5f9",    # bg cho cover metric strip
+    "ribbon_gold": "#b8860b",       # accent gold cho cover (sang)
+    "ribbon_gold_light": "#fef3c7",
 
     # Bảng tỷ số / grade.
     "grade_A": "#10b981",
@@ -68,18 +73,26 @@ WEIGHT_LABEL = "bold"
 
 # ===================== SIZES =====================
 SIZES = {
-    # Cover.
-    "cover_title": 22,
-    "cover_subtitle": 13,
-    "cover_company": 20,
-    "cover_period": 13,
-    "cover_value_label": 12,
-    "cover_value_amount": 24,
+    # Cover (IB-style hero).
+    "cover_eyebrow": 9,             # small caps "BÁO CÁO ĐỊNH GIÁ"
+    "cover_title": 32,              # company name (rất to)
+    "cover_subtitle": 12,           # period · industry
+    "cover_value_label": 9,         # small caps "EQUITY VALUE"
+    "cover_value_amount": 38,       # số fair value (rất to)
+    "cover_value_unit": 11,
+    "cover_metric_label": 8,        # nhãn metric strip
+    "cover_metric_value": 13,
+    "cover_footer": 8.5,
+
+    # Section title card (top of each section).
+    "section_card_number": 36,      # "01", "02" trong vòng tròn
+    "section_card_title": 20,
+    "section_card_subtitle": 11,
 
     # Page (non-cover).
-    "page_title": 15,
-    "section_title": 12,
-    "subsection_title": 11,
+    "page_title": 14,
+    "section_title": 11.5,
+    "subsection_title": 10.5,
     "label": 9,
 
     # Body.
@@ -87,6 +100,7 @@ SIZES = {
     "body_small": 9,
     "caption": 8.5,
     "footnote": 8,
+    "running_header": 8,            # company | section | page #
 }
 
 
