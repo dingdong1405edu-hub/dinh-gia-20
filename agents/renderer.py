@@ -421,10 +421,14 @@ def _section_executive_summary(financials, valuation, thesis):
 
     y = 0.92
     if es.get("headline"):
-        ax.text(0, y, es["headline"], fontsize=12, fontweight="bold",
-                color=C["primary"], va="top", wrap=True)
-        y -= 0.05
+        # Headline có thể rất dài → wrap thay vì 1 dòng kéo tràn.
+        y = _draw_block(ax, es["headline"], x=0, y=y,
+                        max_chars=82, max_lines=3,
+                        fontsize=12, color=C["primary"],
+                        line_height=0.025)
+        y -= 0.025
 
+    # KV grid: 2 cột, mỗi pair (key 0.18 + value 0.30). Auto-fit + auto-truncate.
     y = _draw_kv_grid(ax, [
         ("Doanh nghiệp", company.get("name") or "—"),
         ("MST", company.get("tax_code") or "—"),
@@ -436,8 +440,8 @@ def _section_executive_summary(financials, valuation, thesis):
         ("Tổng tài sản", _fmt_money(_get(bs_cur, "assets", "total_assets"))),
         ("Vốn CSH", _fmt_money(_get(bs_cur, "equity", "total_equity"))),
         ("Nợ phải trả", _fmt_money(_get(bs_cur, "liabilities", "total_liabilities"))),
-    ], x=0, y=y, col_widths=[0.20, 0.30], cols=2)
-    y -= 0.02
+    ], x=0, y=y, col_widths=[0.18, 0.30], cols=2, line_height=0.030)
+    y -= 0.025
 
     if val_summary.get("method_values"):
         ax.text(0, y, "Kết quả định giá theo phương pháp", fontsize=12,
@@ -728,28 +732,72 @@ def _section_industry(industry):
         ax2.text(0, y, "Đối thủ cạnh tranh chính", fontsize=12,
                  fontweight="bold", color=C["primary"], va="top")
         y -= 0.030
-        rows = []
-        for c in competitors[:8]:
-            rows.append((c.get("name") or "—",
-                         _fmt_billion(c.get("estimated_revenue_vnd_billion")),
-                         _fmt_pct_or_dash(c.get("market_share_pct")),
-                         c.get("note") or ""))
-        ax2.text(0, y, "Tên DN", fontsize=9, fontweight="bold", color=C["text_muted"], va="top")
-        ax2.text(0.30, y, "Doanh thu ước", fontsize=9, fontweight="bold", color=C["text_muted"], va="top")
-        ax2.text(0.50, y, "Thị phần", fontsize=9, fontweight="bold", color=C["text_muted"], va="top")
-        ax2.text(0.65, y, "Ghi chú", fontsize=9, fontweight="bold", color=C["text_muted"], va="top")
-        y -= 0.020
-        ax2.plot([0, 1], [y + 0.005, y + 0.005], color="#d1d5db", linewidth=0.6)
-        for name, rev, share, note in rows:
-            if y < 0.30:
+        # Geometry rõ ràng: name 0.28 | rev 0.16 (right-align) | share 0.12 (right) | note 0.42
+        col_name_w  = 0.28
+        col_rev_w   = 0.16
+        col_share_w = 0.12
+        col_note_w  = 1.0 - col_name_w - col_rev_w - col_share_w  # 0.44
+        col_name_x  = 0
+        col_rev_x   = col_name_x + col_name_w
+        col_share_x = col_rev_x + col_rev_w
+        col_note_x  = col_share_x + col_share_w
+        PAD = 0.005
+
+        # Header row + background.
+        ax2.add_patch(Rectangle((0, y - 0.004), 1.0, 0.022,
+                                facecolor=C["primary_band"], edgecolor="none",
+                                transform=ax2.transAxes, zorder=0))
+        ax2.text(col_name_x + PAD, y,
+                 _fit_text("Tên DN", col_name_w - 2 * PAD, 9),
+                 fontsize=9, fontweight=WEIGHT_HEADER, color=C["primary_dark"],
+                 va="top", zorder=2)
+        ax2.text(col_rev_x + col_rev_w - PAD, y,
+                 _fit_text("Doanh thu ước", col_rev_w - 2 * PAD, 9),
+                 fontsize=9, fontweight=WEIGHT_HEADER, color=C["primary_dark"],
+                 va="top", ha="right", zorder=2)
+        ax2.text(col_share_x + col_share_w - PAD, y,
+                 _fit_text("Thị phần", col_share_w - 2 * PAD, 9),
+                 fontsize=9, fontweight=WEIGHT_HEADER, color=C["primary_dark"],
+                 va="top", ha="right", zorder=2)
+        ax2.text(col_note_x + PAD, y,
+                 _fit_text("Ghi chú", col_note_w - 2 * PAD, 9),
+                 fontsize=9, fontweight=WEIGHT_HEADER, color=C["primary_dark"],
+                 va="top", zorder=2)
+        y -= 0.022
+        ax2.plot([0, 1], [y + 0.004, y + 0.004],
+                 color=C["border_strong"], linewidth=0.5, zorder=1)
+        y -= 0.003
+
+        for row_idx, c in enumerate(competitors[:8]):
+            if y < 0.20:
                 break
-            ax2.text(0, y, name, fontsize=9.5, color=C["text"], va="top")
-            ax2.text(0.30, y, rev, fontsize=9.5, color=C["text"], va="top")
-            ax2.text(0.50, y, share, fontsize=9.5, color=C["text"], va="top")
-            _draw_block(ax2, note[:70], x=0.65, y=y,
-                        max_chars=42, max_lines=2,
-                        fontsize=9, color=C["text_muted"], line_height=0.016)
-            y -= 0.030
+            name = c.get("name") or "—"
+            rev = _fmt_billion(c.get("estimated_revenue_vnd_billion"))
+            share = _fmt_pct_or_dash(c.get("market_share_pct"))
+            note = c.get("note") or ""
+            row_h = 0.030
+            if row_idx % 2 == 1:
+                ax2.add_patch(Rectangle((0, y - row_h + 0.004), 1.0, row_h,
+                                        facecolor=C["surface_alt"], edgecolor="none",
+                                        transform=ax2.transAxes, zorder=0))
+            # Name (left-align, truncate).
+            ax2.text(col_name_x + PAD, y,
+                     _fit_text(name, col_name_w - 2 * PAD, 9.5),
+                     fontsize=9.5, color=C["text_strong"], fontweight=WEIGHT_HEADER,
+                     va="top", zorder=2)
+            # Revenue (right-align, truncate).
+            ax2.text(col_rev_x + col_rev_w - PAD, y,
+                     _fit_text(rev, col_rev_w - 2 * PAD, 9.5),
+                     fontsize=9.5, color=C["text"], va="top", ha="right", zorder=2)
+            # Share (right-align, truncate).
+            ax2.text(col_share_x + col_share_w - PAD, y,
+                     _fit_text(share, col_share_w - 2 * PAD, 9.5),
+                     fontsize=9.5, color=C["text"], va="top", ha="right", zorder=2)
+            # Note — wrapped block constrained to note column width.
+            _draw_block(ax2, note, x=col_note_x + PAD, y=y,
+                        max_chars=48, max_lines=2,
+                        fontsize=8.5, color=C["text_muted"], line_height=0.014)
+            y -= row_h
         y -= 0.005
 
     landscape = industry.get("competitive_landscape")
@@ -1076,49 +1124,80 @@ def _section_projections(projection):
         ax.text(0, y, "Dự phóng KQKD & FCFF", fontsize=12,
                 fontweight="bold", color=C["primary"], va="top")
         y -= 0.024
+        # Geometry: label col 0.22, mỗi năm chia đều phần còn lại (max 1.0 - 0.22).
         headers = ["Khoản mục"] + [p.get("year_label", f"Y{i+1}") for i, p in enumerate(projections)]
         cols = len(headers)
-        col_w = (0.95) / cols
-        col_w_label = 0.25
-        col_w_year = (0.95 - col_w_label) / max(1, cols - 1)
-        for i, h in enumerate(headers):
-            x = 0 if i == 0 else col_w_label + (i - 1) * col_w_year
-            ha = "left" if i == 0 else "right"
-            ax.text(x + (0 if i == 0 else col_w_year), y, h,
-                    fontsize=9, fontweight="bold", color=C["text_muted"],
-                    va="top", ha=ha)
-        y -= 0.018
-        ax.plot([0, 0.95], [y + 0.005, y + 0.005], color="#d1d5db", linewidth=0.5)
+        col_w_label = 0.22
+        col_w_year = (1.0 - col_w_label) / max(1, cols - 1)
+        PAD = 0.005
+        # Header row + zebra bg.
+        ax.add_patch(Rectangle((0, y - 0.004), 1.0, 0.022,
+                               facecolor=C["primary_band"], edgecolor="none",
+                               transform=ax.transAxes, zorder=0))
+        # Label header.
+        ax.text(PAD, y, _fit_text("Khoản mục", col_w_label - 2 * PAD, 9),
+                fontsize=9, fontweight=WEIGHT_HEADER, color=C["primary_dark"],
+                va="top", zorder=2)
+        # Year headers — right-aligned at right edge of each year column.
+        for i, h in enumerate(headers[1:]):
+            right_edge = col_w_label + (i + 1) * col_w_year - PAD
+            ax.text(right_edge, y,
+                    _fit_text(str(h), col_w_year - 2 * PAD, 9),
+                    fontsize=9, fontweight=WEIGHT_HEADER, color=C["primary_dark"],
+                    va="top", ha="right", zorder=2)
+        y -= 0.022
+        ax.plot([0, 1.0], [y + 0.004, y + 0.004],
+                color=C["border_strong"], linewidth=0.5, zorder=1)
+        y -= 0.003
 
         proj_rows = [
-            ("Doanh thu", "revenue", False),
-            ("Tăng trưởng", "growth_pct", "pct"),
-            ("LN gộp", "gross_profit", False),
-            ("EBIT", "ebit", False),
-            ("EBITDA", "ebitda", False),
-            ("LNST", "net_income", False),
-            ("CAPEX", "capex", False),
-            ("ΔWC", "change_in_wc", False),
-            ("FCFF", "fcff", "highlight"),
+            ("Doanh thu",   "revenue",       "money"),
+            ("Tăng trưởng", "growth_pct",    "pct"),
+            ("LN gộp",      "gross_profit",  "money"),
+            ("EBIT",        "ebit",          "money"),
+            ("EBITDA",      "ebitda",        "money"),
+            ("LNST",        "net_income",    "money"),
+            ("CAPEX",       "capex",         "money"),
+            ("ΔWC",         "change_in_wc",  "money"),
+            ("FCFF",        "fcff",          "highlight"),
         ]
-        for label, key, mode in proj_rows:
+        for row_idx, (label, key, mode) in enumerate(proj_rows):
             if y < 0.10:
                 break
-            color = C["primary"] if mode == "highlight" else C["text"]
-            fw = "bold" if mode == "highlight" else "normal"
+            is_highlight = mode == "highlight"
+            color = C["primary_dark"] if is_highlight else C["text"]
+            fw = WEIGHT_HEADER if is_highlight else WEIGHT_BODY
             fs = 9
-            ax.text(0, y, label, fontsize=fs, color=color,
-                    va="top", fontweight=fw)
+            line_h = 0.022
+            # Zebra striping for readability (skip highlight row).
+            if is_highlight:
+                ax.add_patch(Rectangle((0, y - line_h + 0.004), 1.0, line_h,
+                                       facecolor=C["primary_light"], edgecolor="none",
+                                       transform=ax.transAxes, zorder=0))
+            elif row_idx % 2 == 1:
+                ax.add_patch(Rectangle((0, y - line_h + 0.004), 1.0, line_h,
+                                       facecolor=C["surface_alt"], edgecolor="none",
+                                       transform=ax.transAxes, zorder=0))
+            # Label.
+            ax.text(PAD, y,
+                    _fit_text(label, col_w_label - 2 * PAD, fs),
+                    fontsize=fs, color=color, fontweight=fw, va="top", zorder=2)
+            # Year values — compact format, right-aligned at right edge.
             for i, p in enumerate(projections):
-                xx = col_w_label + i * col_w_year + col_w_year
+                right_edge = col_w_label + (i + 1) * col_w_year - PAD
                 v = p.get(key)
                 if mode == "pct":
                     s = _fmt_pct_or_dash(v)
+                    s = _fit_text(s, col_w_year - 2 * PAD, fs)
                 else:
-                    s = _fmt_money(v)
-                ax.text(xx, y, s, fontsize=fs, color=color,
-                        va="top", ha="right", fontweight=fw)
-            y -= 0.020
+                    s = _fmt_money_compact(v, col_w_year - 2 * PAD, fs)
+                ax.text(right_edge, y, s,
+                        fontsize=fs, color=color, fontweight=fw,
+                        va="top", ha="right", zorder=2)
+            if is_highlight:
+                ax.plot([0, 1.0], [y + 0.002, y + 0.002],
+                        color=C["primary_dark"], linewidth=0.8, zorder=2)
+            y -= line_h
         y -= 0.010
 
     if summary and y > 0.10:
@@ -1665,8 +1744,22 @@ def _new_page(title: str):
 # ============================ Helpers — drawing ============================
 
 def _draw_block(ax, text, x, y, fontsize, color, max_chars, max_lines, line_height):
+    """Multi-line wrapped paragraph. Mỗi line được hard-clip bởi _fit_text để
+    nếu textwrap tạo line dài hơn max_chars dự kiến (vd: 1 từ không bẻ được),
+    line đó vẫn không tràn sang vùng khác.
+
+    Width an toàn = max_chars × char_w. Nếu dòng wrap dài quá thì truncate.
+    Cuối line wrapping: nếu có >max_lines dòng, dòng cuối thêm "…" để báo
+    text bị cắt.
+    """
     if not text:
         return y
+    # Hard-cap width per line based on fontsize and intended max_chars.
+    safe_width = max_chars * fontsize * _CHAR_WIDTH_PER_PT
+    # Some prefix space (e.g. bullet indent) may already have eaten width; use
+    # current x as offset (assume target right edge = 1.0).
+    available = max(0.05, min(safe_width, 1.0 - x - 0.01))
+
     lines: list[str] = []
     for paragraph in str(text).split("\n"):
         if not paragraph.strip():
@@ -1675,10 +1768,18 @@ def _draw_block(ax, text, x, y, fontsize, color, max_chars, max_lines, line_heig
         wrapped = textwrap.wrap(paragraph, width=max_chars,
                                 break_long_words=False, break_on_hyphens=False)
         lines.extend(wrapped or [""])
-    for i, line in enumerate(lines[:max_lines]):
+
+    truncated = len(lines) > max_lines
+    visible = lines[:max_lines]
+    for i, line in enumerate(visible):
+        # Mark "…" on last visible line if there's more.
+        if i == max_lines - 1 and truncated:
+            line = (line + " …") if line else "…"
+        # Per-line hard clip (catches stubborn long words / non-wrappable text).
+        line = _fit_text(line, available, fontsize)
         ax.text(x, y - i * line_height, line, fontsize=fontsize,
                 color=color, va="top")
-    return y - len(lines[:max_lines]) * line_height
+    return y - len(visible) * line_height
 
 
 def _draw_bullet(ax, text, x, y, fontsize, color, max_chars, max_lines, line_height):
@@ -1747,15 +1848,54 @@ def _looks_numeric(text: str) -> bool:
     return stripped.isdigit() if stripped else False
 
 
-def _draw_kv_grid(ax, items, x, y, col_widths, cols=2, line_height=0.024):
+def _draw_kv_grid(ax, items, x, y, col_widths, cols=2, line_height=0.028):
+    """Key/value grid with proper truncation. Auto-derives column geometry
+    based on number of cols + available width (0..1) so it never overflows.
+
+    col_widths = [key_w, value_w] mỗi cell. Mỗi pair (k, v) chiếm
+    (key_w + value_w). Gap giữa các pair được tính tự động để vừa width.
+    """
+    if cols < 1:
+        cols = 1
+    pair_w = col_widths[0] + col_widths[1]
+    # Available total width = 1 - x. Tính gap để N pair vừa.
+    available = max(0.0, 1.0 - x)
+    if cols == 1:
+        gap = 0.0
+        pair_w = min(pair_w, available)
+    else:
+        # N pair + (N-1) gap = available
+        gap = max(0.01, (available - cols * pair_w) / (cols - 1))
+        if gap > 0.06:
+            gap = 0.06  # cap nếu thừa width
+    key_fs = 9
+    val_fs = 10
+    key_inner = col_widths[0] - 0.005
+    val_inner = col_widths[1] - 0.005
+    PAD = 0.003
     for i, (k, v) in enumerate(items):
         col = i % cols
         row = i // cols
-        cx = x + col * (col_widths[0] + col_widths[1] + 0.04)
+        cx = x + col * (pair_w + gap)
         cy = y - row * line_height
-        ax.text(cx, cy, k, fontsize=9, color=C["text_muted"], va="top")
-        ax.text(cx + col_widths[0], cy, str(v), fontsize=10,
-                color=C["text_strong"], va="top", fontweight="bold")
+        # Key (light grey, small)
+        ax.text(cx + PAD, cy,
+                _fit_text(str(k), key_inner, key_fs),
+                fontsize=key_fs, color=C["text_muted"], va="top")
+        # Value (strong, bold) — truncate hoặc compact cho number-like.
+        v_str = str(v) if v is not None else "—"
+        # Nếu là số formatted (chỉ chứa số + dấu chấm/phẩy/dấu trừ) → compact.
+        if v_str and v_str != "—" and v_str.replace(".", "").replace(",", "").replace("-", "").replace("+", "").isdigit():
+            try:
+                num_val = float(v_str.replace(".", "").replace(",", "."))
+                v_str = _fmt_money_compact(num_val, val_inner, val_fs)
+            except ValueError:
+                v_str = _fit_text(v_str, val_inner, val_fs)
+        else:
+            v_str = _fit_text(v_str, val_inner, val_fs)
+        ax.text(cx + col_widths[0] + PAD, cy, v_str,
+                fontsize=val_fs, color=C["text_strong"], va="top",
+                fontweight=WEIGHT_HEADER)
     rows = (len(items) + cols - 1) // cols
     return y - rows * line_height
 
