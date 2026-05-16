@@ -144,3 +144,22 @@ def rating_color(rating: str) -> str:
         "poor": COLORS["poor"],
         "n/a": COLORS["text_dim"],
     }.get(rating, COLORS["text_muted"])
+
+
+def apply_brand_override(overrides: dict) -> dict:
+    """Patch the module-level COLORS dict with brand overrides.
+
+    Returns a snapshot of the original values so the caller can restore them.
+    Only keys that exist in COLORS are applied (unknown keys are silently skipped).
+    """
+    saved = {}
+    for key, val in overrides.items():
+        if key in COLORS:
+            saved[key] = COLORS[key]
+            COLORS[key] = val
+    return saved
+
+
+def restore_colors(saved: dict) -> None:
+    """Restore COLORS to the snapshot returned by apply_brand_override."""
+    COLORS.update(saved)

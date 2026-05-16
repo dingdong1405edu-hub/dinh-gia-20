@@ -17,10 +17,11 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 
 from agents.analyzer import analyze
+from agents.brand_scraper import scrape_brand
 from agents.business_profile import analyze_business
 from agents.excel_writer import export_excel
 from agents.extractor import extract
@@ -55,8 +56,9 @@ JOBS: dict[str, dict] = {}
 
 AGENT_NAMES = [
     ("agent1_extract",   "1. Trích xuất BCTC"),
+    ("agent_brand",      "Brand Style — Nhận diện màu website"),
     ("agent2_industry",  "2. Phân tích ngành"),
-    ("agent4_ratios",    "4. Tỷ số tài chính"),       # song song với agent2
+    ("agent4_ratios",    "4. Tỷ số tài chính"),       # song song với agent_brand + agent2
     ("agent3_business",  "3. Tổng quan DN"),
     ("agent5_projector", "5. Dự phóng 5 năm"),
     ("agent6_valuator",  "6. Định giá DCF/Multiples"),
@@ -184,7 +186,10 @@ def health() -> dict:
 #   PROCESS (kicks off background pipeline) + STATUS (poll)
 # ============================================================
 @app.post("/api/process")
-async def process(file: UploadFile = File(...)) -> dict:
+async def process(
+    file: UploadFile = File(...),
+    website: str | None = Form(None),
+) -> dict:
     """Validate upload, create job, kick off background pipeline. Returns job_id."""
     name = (file.filename or "").lower()
     suffix = Path(name).suffix
@@ -205,7 +210,7 @@ async def process(file: UploadFile = File(...)) -> dict:
     JOBS[job_id] = _init_job(job_id)
 
     # Kick off in background — return immediately to client.
-    asyncio.create_task(_run_pipeline(job_id, upload_path, job_dir))
+    asyncio.create_task(_run_pipeline(job_id, upload_path, job_dir, website or None))
 
     return {
         "job_id": job_id,
@@ -235,7 +240,8 @@ def get_status(job_id: str) -> dict:
 # ============================================================
 #   PIPELINE (background task)
 # ============================================================
-async def _run_pipeline(job_id: str, upload_path: Path, job_dir: Path) -> None:
+async def _run_pipeline(job_id: str, upload_path: Path, job_dir: Path,
+                        website: str | None = None) -> None:
     """Run the 8-agent pipeline. Updates JOBS[job_id] state continuously."""
     job = JOBS[job_id]
     job["status"] = "running"
@@ -249,11 +255,23 @@ async def _run_pipeline(job_id: str, upload_path: Path, job_dir: Path) -> None:
     trace: dict = {
         "job_id": job_id,
         "created_at": job["created_at"],
+        "website": website,
     }
 
     a1 = a2_industry = a3_business = a4_ratios = None
     a5_projection = a6_valuation = a7_thesis = None
     a8_render = a8_excel = None
+    a_brand: dict = {}
+
+    async def _run_brand_safe(company_info: dict) -> dict:
+        """Wrap brand scraper: non-fatal — pipeline continues on any failure."""
+        try:
+            return await _run_agent(
+                job_id, "agent_brand", scrape_brand, website, company_info
+            )
+        except Exception as exc:
+            log.warning("[%s] agent_brand failed (non-fatal): %s", job_id, exc)
+            return {}
 
     try:
         # ---- Agent 1: Extract BCTC (sequential, blocks all downstream).
@@ -263,11 +281,15 @@ async def _run_pipeline(job_id: str, upload_path: Path, job_dir: Path) -> None:
         if not financials:
             raise RuntimeError("Không trích xuất được dữ liệu tài chính từ BCTC.")
 
-        # ---- Agents 2 + 4 in parallel.
-        a2_industry, a4_ratios = await asyncio.gather(
+        company_info = financials.get("company") or {}
+
+        # ---- Agents Brand + 2 + 4 in parallel (brand is non-fatal).
+        a_brand, a2_industry, a4_ratios = await asyncio.gather(
+            _run_brand_safe(company_info),
             _run_agent(job_id, "agent2_industry", analyze_industry, financials),
             _run_agent(job_id, "agent4_ratios", analyze, financials),
         )
+        trace["agent_brand"] = a_brand
         trace["agent2_industry"] = a2_industry
         trace["agent4_ratios"] = a4_ratios
 
@@ -302,7 +324,8 @@ async def _run_pipeline(job_id: str, upload_path: Path, job_dir: Path) -> None:
         )
         trace["agent7_thesis"] = a7_thesis
 
-        # ---- Agent 8a: render PDFs.
+        # ---- Agent 8a: render PDFs (pass brand_style if scraper succeeded).
+        brand_style = (a_brand or {}).get("style_override") or None
         payload = {
             "extracted": a1,
             "industry": a2_industry,
@@ -315,6 +338,7 @@ async def _run_pipeline(job_id: str, upload_path: Path, job_dir: Path) -> None:
         a8_render = await _run_agent(
             job_id, "agent8_renderer", render_all,
             payload, str(job_dir), str(full_pdf_path),
+            brand_style,
         )
         trace["agent8_renderer"] = a8_render
 
@@ -386,7 +410,15 @@ async def _run_pipeline(job_id: str, upload_path: Path, job_dir: Path) -> None:
         "investment_thesis": thesis_data.get("investment_thesis"),
         "deal_recommendation": thesis_data.get("deal_recommendation"),
         "files": _file_manifest(job_id, a8_render or {}, a8_excel or {}),
+        "brand": {
+            "url_used":    (a_brand or {}).get("url_used"),
+            "url_source":  (a_brand or {}).get("url_source"),
+            "brand_colors": (a_brand or {}).get("brand_colors"),
+            "notes":       (a_brand or {}).get("notes"),
+            "elapsed_sec": (a_brand or {}).get("elapsed_sec"),
+        },
         "meta": {
+            "agent_brand":    _meta(a_brand),
             "agent1_extract": _meta(a1),
             "agent2_industry": _meta(a2_industry),
             "agent3_business": _meta(a3_business),

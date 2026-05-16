@@ -2,12 +2,19 @@
 
 Style tokens (màu, font, size, layout) tách sang agents/report_style.py.
 Sửa file đó để đổi look toàn bộ báo cáo.
+
+Brand override: render_all / render_valuation_report accept optional brand_style dict
+(keys matching COLORS in report_style.py). Colors are patched, report rendered, then
+restored. A threading.Lock serialises renders so concurrent jobs don't clobber colors.
 """
 import json
 import textwrap
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
+
+_RENDER_LOCK = threading.Lock()
 
 import matplotlib
 
@@ -27,6 +34,8 @@ from agents.report_style import (
     WEIGHT_BODY,
     grade_color as _grade_color_fn,
     rating_color as _rating_color_fn,
+    apply_brand_override,
+    restore_colors,
 )
 
 # Register vendored Vietnamese-supporting fonts (full diacritic coverage).
@@ -136,18 +145,25 @@ SECTIONS = [
 ]
 
 
-def render_valuation_report(payload: dict, output_path: str) -> dict:
+def render_valuation_report(payload: dict, output_path: str,
+                            brand_style: dict | None = None) -> dict:
     """Render báo cáo đầy đủ thành 1 file PDF."""
     t0 = time.time()
-    bundle = _bundle(payload)
-    _reset_report_ctx(bundle.get("financials"))
-    pages = 0
-    with PdfPages(output_path) as pdf:
-        for _kind, _slug, _title, builder in SECTIONS:
-            for fig in builder(bundle):
-                pdf.savefig(fig)
-                plt.close(fig)
-                pages += 1
+    with _RENDER_LOCK:
+        saved = apply_brand_override(brand_style) if brand_style else {}
+        try:
+            bundle = _bundle(payload)
+            _reset_report_ctx(bundle.get("financials"))
+            pages = 0
+            with PdfPages(output_path) as pdf:
+                for _kind, _slug, _title, builder in SECTIONS:
+                    for fig in builder(bundle):
+                        pdf.savefig(fig)
+                        plt.close(fig)
+                        pages += 1
+        finally:
+            if saved:
+                restore_colors(saved)
     return {
         "elapsed_sec": round(time.time() - t0, 2),
         "pages": pages,
@@ -155,42 +171,51 @@ def render_valuation_report(payload: dict, output_path: str) -> dict:
     }
 
 
-def render_all(payload: dict, output_dir: str, full_pdf_path: str) -> dict:
+def render_all(payload: dict, output_dir: str, full_pdf_path: str,
+               brand_style: dict | None = None) -> dict:
     """
     Render đồng thời:
       - Full PDF (tất cả mục) tại full_pdf_path.
       - Mỗi mục thành 1 PDF riêng tại output_dir/<slug>.pdf.
 
     Mỗi figure chỉ build 1 lần rồi ghi vào cả 2 PdfPages → tiết kiệm.
+    brand_style: nếu có, ghi đè COLORS tạm thời trong suốt quá trình render.
     """
     t0 = time.time()
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
-    bundle = _bundle(payload)
-    _reset_report_ctx(bundle.get("financials"))
 
-    section_files = []
-    total_pages = 0
-    with PdfPages(full_pdf_path) as full_pdf:
-        for kind, slug, title, builder in SECTIONS:
-            figs = list(builder(bundle))
-            if not figs:
-                continue
-            section_path = out / f"{slug}.pdf"
-            with PdfPages(str(section_path)) as sec_pdf:
-                for fig in figs:
-                    sec_pdf.savefig(fig)
-                    full_pdf.savefig(fig)
-                    plt.close(fig)
-                    total_pages += 1
-            section_files.append({
-                "kind": kind,
-                "slug": slug,
-                "title": title,
-                "file_name": section_path.name,
-                "pages": len(figs),
-                "size_bytes": section_path.stat().st_size,
-            })
+    with _RENDER_LOCK:
+        saved = apply_brand_override(brand_style) if brand_style else {}
+        try:
+            bundle = _bundle(payload)
+            _reset_report_ctx(bundle.get("financials"))
+
+            section_files = []
+            total_pages = 0
+            with PdfPages(full_pdf_path) as full_pdf:
+                for kind, slug, title, builder in SECTIONS:
+                    figs = list(builder(bundle))
+                    if not figs:
+                        continue
+                    section_path = out / f"{slug}.pdf"
+                    with PdfPages(str(section_path)) as sec_pdf:
+                        for fig in figs:
+                            sec_pdf.savefig(fig)
+                            full_pdf.savefig(fig)
+                            plt.close(fig)
+                            total_pages += 1
+                    section_files.append({
+                        "kind": kind,
+                        "slug": slug,
+                        "title": title,
+                        "file_name": section_path.name,
+                        "pages": len(figs),
+                        "size_bytes": section_path.stat().st_size,
+                    })
+        finally:
+            if saved:
+                restore_colors(saved)
 
     return {
         "elapsed_sec": round(time.time() - t0, 2),
